@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 import threading
 import time
 import uuid
@@ -59,6 +61,8 @@ class JobStore:
         self._root = Path(root)
         self._ttl = ttl_seconds
         self._jobs: dict[str, Job] = {}
+        self._queues: dict[str, asyncio.Queue] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
 
     def create(self, url: str, mode: str, format_id: str | None = None) -> Job:
@@ -87,9 +91,55 @@ class JobStore:
     def remove(self, job_id: str) -> None:
         with self._lock:
             self._jobs.pop(job_id, None)
+            self._queues.pop(job_id, None)
 
     def expired_ids(self, now: float | None = None) -> list[str]:
         moment = time.monotonic() if now is None else now
         with self._lock:
             return [job.id for job in self._jobs.values()
                     if moment - job.created_at > self._ttl]
+
+    def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Record the event loop that serves the WebSocket routes."""
+        self._loop = loop
+
+    def queue_for(self, job_id: str) -> asyncio.Queue:
+        """Return the progress queue of a job, and make one if needed."""
+        with self._lock:
+            queue = self._queues.get(job_id)
+            if queue is None:
+                queue = asyncio.Queue()
+                self._queues[job_id] = queue
+            return queue
+
+    def publish(self, job_id: str, payload: dict) -> None:
+        """Send one progress update. Safe to call from a worker thread.
+
+        An asyncio.Queue is not thread safe, so the update crosses into
+        the event loop through call_soon_threadsafe.
+        """
+        queue = self.queue_for(job_id)
+        loop = self._loop
+        if loop is None:
+            queue.put_nowait(payload)
+            return
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
+        except RuntimeError:
+            # The loop is closed. The page is gone, so the update is lost.
+            pass
+
+
+def delete_workdir(job: Job) -> bool:
+    """Delete the whole work folder of a job.
+
+    Return True when the folder is gone. A delete can fail when another
+    program holds a file handle open. The janitor then tries again.
+    """
+    if not job.workdir:
+        return True
+    path = Path(job.workdir)
+    if not path.exists():
+        return True
+    shutil.rmtree(path, ignore_errors=True)
+    return not path.exists()

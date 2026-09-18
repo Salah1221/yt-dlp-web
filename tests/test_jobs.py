@@ -1,3 +1,5 @@
+import asyncio
+import threading
 import time
 
 import pytest
@@ -67,3 +69,55 @@ def test_public_hides_the_server_paths(store):
     assert "file_path" not in data
     assert "workdir" not in data
     assert "cancelled" not in data
+
+
+def test_publish_without_a_loop_puts_the_payload_in_the_queue(store):
+    job = store.create("https://example.com/v", "audio")
+    store.publish(job.id, {"state": jobs.DOWNLOADING})
+    queue = store.queue_for(job.id)
+    assert queue.get_nowait() == {"state": jobs.DOWNLOADING}
+
+
+def test_queue_for_returns_the_same_queue_every_time(store):
+    job = store.create("https://example.com/v", "audio")
+    assert store.queue_for(job.id) is store.queue_for(job.id)
+
+
+def test_publish_from_a_worker_thread_reaches_the_loop(store):
+    async def scenario():
+        job = store.create("https://example.com/v", "audio")
+        store.attach_loop(asyncio.get_running_loop())
+        queue = store.queue_for(job.id)
+        thread = threading.Thread(
+            target=store.publish, args=(job.id, {"state": jobs.READY}))
+        thread.start()
+        payload = await asyncio.wait_for(queue.get(), timeout=2)
+        thread.join()
+        return payload
+
+    assert asyncio.run(scenario()) == {"state": jobs.READY}
+
+
+def test_remove_drops_the_queue_too(store):
+    job = store.create("https://example.com/v", "audio")
+    first = store.queue_for(job.id)
+    store.remove(job.id)
+    assert store.queue_for(job.id) is not first
+
+
+def test_delete_workdir_removes_the_folder(store, tmp_path):
+    job = store.create("https://example.com/v", "audio")
+    (tmp_path / job.id / "song.mp3").write_bytes(b"data")
+    assert jobs.delete_workdir(job) is True
+    assert not (tmp_path / job.id).exists()
+
+
+def test_delete_workdir_is_safe_when_the_folder_is_already_gone(store, tmp_path):
+    job = store.create("https://example.com/v", "audio")
+    jobs.delete_workdir(job)
+    assert jobs.delete_workdir(job) is True
+
+
+def test_delete_workdir_is_safe_when_there_is_no_folder():
+    job = jobs.Job(id="x" * 32, url="https://example.com/v", mode="audio")
+    assert jobs.delete_workdir(job) is True

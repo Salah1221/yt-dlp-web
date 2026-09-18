@@ -1,0 +1,83 @@
+:root {
+  --bg: #12141a;
+  --card: #1c1f27;
+  --line: #2b303b;
+  --text: #e7e9ee;
+  --dim: #98a0b0;
+  --accent: #5b9cff;
+  --bad: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+main { max-width: 46rem; margin: 0 auto; }
+
+h1 { font-size: 1.4rem; letter-spacing: 0.02em; margin: 0 0 1.5rem; }
+h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+
+#probe-form { display: flex; gap: 0.5rem; }
+
+input[type="url"] {
+  flex: 1;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+input[type="url"]:focus { outline: 2px solid var(--accent); }
+
+button, .button {
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+button:hover, .button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+#check, #download { background: var(--accent); border-color: var(--accent); color: #06101f; }
+
+.card {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+#video { display: flex; gap: 1rem; align-items: flex-start; }
+#thumb { width: 160px; border-radius: 6px; background: var(--line); }
+#duration { color: var(--dim); margin: 0 0 0.75rem; font-size: 0.9rem; }
+
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); font-weight: 500; }
+#formats { max-height: 20rem; overflow: auto; }
+
+.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+#fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+#state { margin: 0 0 0.6rem; }
+#stats { color: var(--dim); font-size: 0.9rem; min-height: 1.5rem; }
+
+#message { padding: 0.75rem 1rem; border-radius: 8px; background: #2a1c1f; color: var(--bad); }
+
+.hidden { display: none; }

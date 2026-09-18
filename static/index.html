@@ -1,3 +1,53 @@
 <!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>yt-dlp web</title>
-<p>The page arrives in Task 10.</p>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <h1>yt-dlp web</h1>
+
+  <form id="probe-form">
+    <input id="url" type="url" placeholder="Paste a video URL" required
+           autocomplete="off" spellcheck="false">
+    <button id="check" type="submit">Check</button>
+  </form>
+
+  <p id="message" class="hidden"></p>
+
+  <section id="video" class="card hidden">
+    <img id="thumb" alt="">
+    <div>
+      <h2 id="title"></h2>
+      <p id="duration"></p>
+      <div class="actions">
+        <button data-mode="video" type="button">Video MP4</button>
+        <button data-mode="audio" type="button">Audio MP3</button>
+        <button id="toggle-formats" type="button">Choose a format</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="formats" class="card hidden">
+    <table>
+      <thead>
+        <tr><th>Format</th><th>Type</th><th>Size</th><th></th></tr>
+      </thead>
+      <tbody id="format-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="job" class="card hidden">
+    <p id="state">Starting</p>
+    <div class="bar"><div id="fill"></div></div>
+    <p id="stats"></p>
+    <a id="download" class="button hidden" download>Download</a>
+    <button id="cancel" type="button">Cancel</button>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

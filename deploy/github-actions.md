@@ -20,7 +20,7 @@ The deploy checks out the exact commit that the tests ran against, not the head 
 ## What the deploy does, step by step
 
 1. Checks out the tested commit.
-2. Writes the SSH key and the pinned host key.
+2. Writes the SSH key.
 3. Opens one test connection, so a login fault fails with a clear message.
 4. `rsync --archive --delete`, excluding `.git`, `.venv`, `__pycache__`, `.pytest_cache`, and `work`.
 5. Makes the virtual environment if it is absent, then installs the requirements.
@@ -93,21 +93,7 @@ sudo -u deploy chmod 700 /home/deploy/.ssh
 sudo -u deploy chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-### 5. Read the server host key
-
-Run this on your own machine. It gives the line that pins your server.
-
-```bash
-ssh-keyscan -t ed25519 your.server.address
-```
-
-On Windows, use the OpenSSH client that Git installs. The Microsoft client offers a key exchange that it cannot perform, and the scan then returns nothing:
-
-```bash
-"/c/Program Files/Git/usr/bin/ssh-keyscan.exe" -t ed25519 your.server.address
-```
-
-### 6. The service, the settings, and nginx
+### 5. The service, the settings, and nginx
 
 Copy three files from your own checkout, because the server has no copy yet:
 
@@ -143,7 +129,6 @@ Settings, Secrets and variables, Actions, Secrets.
 | `DEPLOY_HOST` | the server address |
 | `DEPLOY_USER` | `deploy` |
 | `DEPLOY_SSH_KEY` | the whole contents of `ytdlp-deploy-key`, the private half, including the first and last lines |
-| `DEPLOY_KNOWN_HOSTS` | the line that `ssh-keyscan` printed |
 
 ### Variables
 
@@ -171,12 +156,24 @@ The first run makes the virtual environment, so it takes longer than the ones af
 
 | Message | Cause |
 |---|---|
-| `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` is wrong, or the host in it does not match `DEPLOY_HOST` as text |
+| `Could not resolve hostname` | `DEPLOY_HOST` is wrong, or the name does not resolve |
 | `Permission denied (publickey)` | the public half is not in `/home/deploy/.ssh/authorized_keys`, or the permissions are wrong |
 | `sudo: a password is required` | the sudoers file is missing, or the path to `systemctl` does not match |
 | `did not come back within 30s` | the service failed to start. Read `journalctl -u ytdlp-web -n 50` |
 | The final check reports `502` | the service is down, or nginx points at the wrong port |
 | The final check reports `000` | the domain did not answer at all. Check DNS and the firewall |
+
+## The server host key is not pinned
+
+The runner accepts whichever host key answers on the first connection of a job, and refuses a key that changes later in the same job. It does not check that key against a known value.
+
+Pinning is not possible without a stored copy of the key, and on GitHub Actions a stored copy is the only option that does anything. Every run starts on a fresh machine with an empty `known_hosts` file, so "trust the key seen the first time" means "trust any key", because every run is the first time.
+
+**What this gives up.** A party that can redirect this connection, through DNS or a routing change, receives the source that rsync sends, and your real server keeps running the old version.
+
+**What it does not give up.** The SSH private key is not exposed. It never travels. It signs one challenge per connection, and the signature is of no use afterwards.
+
+**To pin it again.** Put the output of `ssh-keyscan -t ed25519 <your host>` in a file in this repository, point `UserKnownHostsFile` at that file in the SSH config block of `deploy.yml`, and change `StrictHostKeyChecking accept-new` to `StrictHostKeyChecking yes`. A host key is a public key, so the file holds no secret and belongs in the repository rather than in a GitHub secret.
 
 ## The application password
 

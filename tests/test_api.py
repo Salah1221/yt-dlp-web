@@ -86,3 +86,50 @@ def test_content_disposition_carries_both_name_forms():
     assert header.startswith("attachment; ")
     assert 'filename="' in header
     assert "filename*=UTF-8''Caf%C3%A9%20Song.mp3" in header
+
+
+def _ready_job(store, tmp_path, name="song.mp3", data=b"audio-bytes"):
+    job = store.create("http://x/y.mp4", "audio")
+    path = tmp_path / job.id / name
+    path.write_bytes(data)
+    store.update(job.id, state=jobs.READY, filename=name,
+                 file_path=str(path), percent=100.0)
+    return job
+
+
+def test_file_route_is_404_for_an_unknown_id(client):
+    assert client.get("/api/jobs/" + "0" * 32 + "/file").status_code == 404
+
+
+def test_file_route_is_409_while_the_job_runs(client, store):
+    job = store.create("http://x/y.mp4", "audio")
+    store.update(job.id, state=jobs.DOWNLOADING)
+    assert client.get(f"/api/jobs/{job.id}/file").status_code == 409
+
+
+def test_file_route_is_410_when_the_file_is_gone(client, store, tmp_path):
+    job = _ready_job(store, tmp_path)
+    (tmp_path / job.id / "song.mp3").unlink()
+    assert client.get(f"/api/jobs/{job.id}/file").status_code == 410
+
+
+def test_file_route_sends_the_bytes_as_an_attachment(client, store, tmp_path):
+    job = _ready_job(store, tmp_path)
+    response = client.get(f"/api/jobs/{job.id}/file")
+    assert response.status_code == 200
+    assert response.content == b"audio-bytes"
+    assert response.headers["content-disposition"].startswith("attachment; ")
+    assert "song.mp3" in response.headers["content-disposition"]
+
+
+def test_file_route_deletes_the_folder_after_it_sends(client, store, tmp_path):
+    job = _ready_job(store, tmp_path)
+    client.get(f"/api/jobs/{job.id}/file")
+    assert not (tmp_path / job.id).exists()
+    assert store.get(job.id) is None
+
+
+def test_a_second_download_gets_404(client, store, tmp_path):
+    job = _ready_job(store, tmp_path)
+    client.get(f"/api/jobs/{job.id}/file")
+    assert client.get(f"/api/jobs/{job.id}/file").status_code == 404

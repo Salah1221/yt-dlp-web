@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from . import config, downloader, jobs
 
@@ -86,6 +87,29 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")
         return job.public()
+
+    @app.get("/api/jobs/{job_id}/file")
+    def job_file(job_id: str) -> FileResponse:
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="no such job")
+        if job.state != jobs.READY or not job.file_path:
+            raise HTTPException(status_code=409,
+                                detail=f"the job is {job.state}")
+        path = Path(job.file_path)
+        if not path.is_file():
+            raise HTTPException(status_code=410, detail="the file is gone")
+
+        def cleanup_after_send() -> None:
+            jobs.delete_workdir(job)
+            job_store.remove(job_id)
+
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": content_disposition(path.name)},
+            background=BackgroundTask(cleanup_after_send),
+        )
 
     @app.delete("/api/jobs/{job_id}")
     def cancel_job(job_id: str) -> dict:

@@ -8,7 +8,7 @@ import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -121,6 +121,29 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
             jobs.delete_workdir(job)
             job_store.remove(job_id)
         return {"cancelled": True}
+
+    @app.websocket("/ws/{job_id}")
+    async def job_progress(websocket: WebSocket, job_id: str) -> None:
+        await websocket.accept()
+        job = job_store.get(job_id)
+        if job is None:
+            await websocket.close(code=4404)
+            return
+        queue = job_store.queue_for(job_id)
+        try:
+            await websocket.send_json(job.public())
+            if job.state in jobs.TERMINAL_STATES:
+                await websocket.close()
+                return
+            while True:
+                payload = await queue.get()
+                await websocket.send_json(payload)
+                if payload.get("state") in jobs.TERMINAL_STATES:
+                    break
+            await websocket.close()
+        except WebSocketDisconnect:
+            # The page went away. The job keeps running.
+            return
 
     return app
 

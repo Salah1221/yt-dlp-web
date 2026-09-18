@@ -14,7 +14,7 @@ Run every command as root, or put `sudo` in front of it.
 | TLS certificate | a certificate file and a private key file that you already own |
 | Access | root or sudo on the server |
 
-This guide does not use certbot. It does not use any certificate automation. You place your own certificate files.
+This guide covers two routes for the certificate. You place your own files, or you let Let's Encrypt issue and renew them. Section 7 describes both.
 
 ## 1. Install the packages
 
@@ -164,6 +164,74 @@ Check that the key belongs to the certificate. The two commands must print the s
 openssl x509 -noout -modulus -in /etc/ssl/ytdlp-web/fullchain.pem | openssl md5
 openssl rsa -noout -modulus -in /etc/ssl/ytdlp-web/privkey.pem | openssl md5
 ```
+
+## 7b. Let's Encrypt, with automatic renewal
+
+A certificate that you install by hand expires, and the site then stops working with no warning. This route renews without you.
+
+### A certificate for one host
+
+Use this when you need `yt-dlp.example.com` only. It needs no API credential.
+
+Let's Encrypt fetches a file over plain HTTP to prove that you control the name. The nginx site file in this folder already serves that path and does not redirect it.
+
+```bash
+apt install -y certbot
+mkdir -p /var/www/certbot
+certbot certonly --webroot -w /var/www/certbot -d yt-dlp.example.com
+```
+
+### A wildcard certificate
+
+Use this when the same certificate must serve several hosts on one domain.
+
+Let's Encrypt issues a wildcard only through the DNS-01 challenge. The tool has to create a TXT record at `_acme-challenge.<your domain>`, so it needs an API credential for your DNS provider. That credential can change every record on the account, and it lives on this server.
+
+A wildcard covers one level only. `*.example.com` covers `a.example.com`. It does not cover `example.com` itself, and it does not cover `a.b.example.com`. Name both when you need both.
+
+Install certbot and the plugin for your DNS provider in their own virtual environment, so the plugin and certbot always share one Python:
+
+```bash
+python3 -m venv /opt/certbot
+/opt/certbot/bin/pip install --upgrade pip
+/opt/certbot/bin/pip install certbot <your-dns-plugin>
+ln -sf /opt/certbot/bin/certbot /usr/local/bin/certbot
+certbot plugins
+```
+
+The last command lists the plugins that certbot can see. Confirm yours appears, then read its own options with `certbot --help <plugin name>`. The option names differ between plugins, so take them from that output rather than from a guide.
+
+Write the credentials to a file that only root can read:
+
+```bash
+install -o root -g root -m 600 /dev/null /etc/letsencrypt/dns.ini
+```
+
+Then request the certificate. Add `--dry-run` the first time. Let's Encrypt limits how many identical certificates it will issue in a week, and a dry run does not count against that limit.
+
+### Reload nginx after every renewal
+
+certbot renews in the background, and nginx keeps the old certificate in memory until it is told to read the new one.
+
+```bash
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh <<'EOF'
+#!/bin/sh
+systemctl reload nginx
+EOF
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+```
+
+### Prove that renewal works
+
+Do not wait 60 days to find out.
+
+```bash
+certbot renew --dry-run
+systemctl list-timers | grep certbot
+```
+
+The first performs a real renewal against the staging service and changes nothing. The second shows the timer that runs it twice a day.
 
 ## 8. Install the nginx site
 

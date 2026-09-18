@@ -1,0 +1,86 @@
+name: deploy
+
+# The deploy runs only after the tests pass on main. A manual run is also
+# possible, for example to put the server back on the current commit.
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Two deploys must never overwrite each other. A running deploy finishes
+# first, and the next one waits.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ytdlp-web' }}
+      SERVICE_NAME: ${{ vars.SERVICE_NAME || 'ytdlp-web' }}
+      PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+
+    steps:
+      - name: Write the SSH key and the known host
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # The known host line pins the server. Without it, StrictHostKeyChecking
+          # cannot tell your server from a machine that answers in its place.
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Update the code and restart the service
+        run: |
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes \
+              -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              bash -s "$DEPLOY_PATH" "$SERVICE_NAME" <<'REMOTE'
+          set -euo pipefail
+          target="$1"
+          service="$2"
+
+          cd "$target"
+
+          # The server holds no local edits. The deploy makes the working
+          # tree match the commit that passed the tests.
+          git fetch --prune origin
+          git reset --hard origin/main
+
+          .venv/bin/python -m pip install --quiet --upgrade -r requirements.txt
+
+          if .venv/bin/python -m pip list --format=freeze | grep -qiE '^curl[-_]cffi'; then
+            echo "curl_cffi is installed. It bypasses the outbound address guard." >&2
+            exit 1
+          fi
+
+          sudo -n /usr/bin/systemctl restart "$service"
+          sleep 2
+          sudo -n /usr/bin/systemctl is-active --quiet "$service"
+          echo "$service is running commit $(git rev-parse --short HEAD)"
+          REMOTE
+
+      - name: Check that the site answers
+        if: env.PUBLIC_URL != ''
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$PUBLIC_URL/login")
+          echo "GET $PUBLIC_URL/login returned $code"
+          # 200 is the login page. Any other code means the deploy did not work.
+          test "$code" = "200"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

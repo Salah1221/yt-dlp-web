@@ -96,7 +96,13 @@ function fillQualities(qualities) {
       : item.label;
     select.appendChild(option);
   });
-  select.disabled = list.length === 0;
+  // A disabled control that offers one choice is noise. Hide the whole row
+  // when the site reports no height at all.
+  if (list.length) {
+    show(el("quality-field"));
+  } else {
+    hide(el("quality-field"));
+  }
 }
 
 function fillFormats(formats) {

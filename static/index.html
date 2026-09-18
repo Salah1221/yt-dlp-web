@@ -11,13 +11,13 @@
 <main>
   <header>
     <h1>yt-dlp web</h1>
-    <button id="logout" type="button" class="hidden">Log out</button>
+    <button id="logout" type="button" class="quiet hidden">Log out</button>
   </header>
 
   <form id="probe-form">
     <input id="url" type="url" inputmode="url" placeholder="Paste a video URL"
            required autocomplete="off" autocapitalize="off" spellcheck="false">
-    <button id="check" type="submit">Check</button>
+    <button id="check" type="submit" class="primary">Check</button>
   </form>
 
   <p id="message" class="hidden"></p>
@@ -27,16 +27,16 @@
     <div class="details">
       <h2 id="title"></h2>
       <p id="duration"></p>
+
       <div class="actions">
-        <div class="action-row">
-          <button data-mode="video" type="button">Video MP4</button>
-          <select id="quality" aria-label="Video quality">
-            <option value="">Best quality</option>
-          </select>
+        <div id="quality-field" class="field">
+          <label for="quality">Quality</label>
+          <select id="quality"></select>
         </div>
-        <div class="action-row">
+        <button data-mode="video" type="button" class="primary">Download video (MP4)</button>
+        <div class="pair">
           <button data-mode="audio" type="button">Audio MP3</button>
-          <button id="toggle-formats" type="button">Choose a format</button>
+          <button id="toggle-formats" type="button">All formats</button>
         </div>
       </div>
     </div>
@@ -56,8 +56,8 @@
     <div class="bar"><div id="fill"></div></div>
     <p id="stats"></p>
     <div class="job-actions">
-      <a id="download" class="button hidden" download>Download</a>
-      <button id="cancel" type="button">Cancel</button>
+      <a id="download" class="button primary hidden" download>Download</a>
+      <button id="cancel" type="button" class="quiet">Cancel</button>
     </div>
   </section>
 </main>

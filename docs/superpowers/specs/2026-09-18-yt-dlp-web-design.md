@@ -11,7 +11,7 @@ The application runs on one machine, for one person, and it binds to the loopbac
 
 ## 2. Constraints
 
-1. The server listens on `127.0.0.1` only. It never binds to `0.0.0.0`.
+1. In local mode the server listens on `127.0.0.1` only. In public mode it binds elsewhere, and it then requires a password and a TLS proxy. See section 12.
 2. The server holds a file only between the start of a job and the end of the browser download.
 3. The page shows percent, speed, and time left while the download runs.
 4. There is no build step for the front end. The page uses plain HTML, CSS, and JavaScript.
@@ -208,7 +208,7 @@ sequenceDiagram
 
 1. If the process stops between the download and the delete, the folder stays until the janitor runs again, or until Windows clears the temporary folder.
 2. Antivirus software can hold a file handle open, and the delete then fails. The janitor retries the delete.
-3. The loopback binding is the only access control. A tunnel or a reverse proxy in front of this server removes that control, and any client can then use the machine and the bandwidth.
+3. In local mode the loopback binding is the only access control. A tunnel or a reverse proxy in front of local mode removes that control. Public mode replaces it with a password and a TLS proxy.
 4. A 4K video needs the video stream, the audio stream, and the merged output on the disk at the same time. Plan for about 2.5 times the size of the final file.
 5. The job records live in memory. A restart of the server loses every job.
 
@@ -226,3 +226,47 @@ The tests use no YouTube URL. They stay fast, and a change on a video site does 
 ## 11. Out of scope
 
 A queue, playlist support, a download history, a database, authentication, subtitles, and a thumbnail embed. Each of these is a separate change.
+
+## 12. Public mode
+
+Local mode assumes the loopback binding is the access control. A server on the public internet has no such thing, so public mode adds four parts.
+
+### 12.1 The login
+
+The password comes from `YTDLP_WEB_PASSWORD`. `POST /api/login` compares it with `hmac.compare_digest`, which takes the same time whichever character is wrong. A plain comparison stops at the first wrong character, and the time it takes then tells an attacker how much of the password is correct.
+
+On success the server sets one cookie, `HttpOnly`, `Secure`, `SameSite=Lax`, for 30 days. The value is `<expiry>.<signature>`, signed with HMAC-SHA256. There is no session store, so a restart logs nobody out.
+
+The signing key is `HMAC-SHA256(password, "ytdlp-web-session")`. This avoids a second setting, and a new password invalidates every old cookie at once.
+
+A failed login costs one second and counts against 10 per hour for that address. nginx limits the same route to 5 per minute.
+
+The cookie check covers every path except the login page, the login route, the logout route, and `/static/`. A browser sends cookies on a WebSocket handshake, so the progress socket is checked in its own route, which does not depend on middleware order.
+
+### 12.2 The outbound address guard
+
+Two layers, because one is not enough.
+
+Layer one runs before the request. It rejects a scheme that is not `http` or `https`, resolves the host, and rejects the URL if **any** resolved address is loopback, private, link-local, reserved, multicast, or unspecified. Checking only the first address is not enough, because a name can resolve to a public and a private address together.
+
+Layer two runs at connection time. Layer one is defeated two ways: a redirect can point at a private address after the check passed, and the DNS answer can change between the check and the connection. The application therefore wraps `socket.create_connection` once. The wrapper reads a thread-local flag, and only the probe and download threads set that flag, so the application's own connections are untouched.
+
+The error message is a fixed string. It never names the address, so the application does not become a scanner that reports what it found.
+
+**The limit of layer two.** It works because yt-dlp's default networking uses Python sockets. An HTTP backend written in C, such as `curl_cffi`, opens its sockets inside the C library and never calls `socket.create_connection`. That package must not be installed.
+
+### 12.3 The limits
+
+| Limit | Where |
+|---|---|
+| Largest file | the yt-dlp `max_filesize` option |
+| Jobs at the same time | a counter checked before the job starts. A second job gets HTTP 429 |
+| Free disk needed | three times the size limit. Below that the job gets HTTP 507 |
+
+### 12.4 The startup rule
+
+`config.check_startup()` raises if the host is not loopback and no password is set. This makes the unsafe combination impossible rather than merely discouraged.
+
+### 12.5 Deployment
+
+`deploy/` holds the systemd unit, the environment template, the nginx site file, and the steps. Two nginx settings break the application quietly if they are missing: the `Upgrade` and `Connection` headers on `/ws/`, without which the progress bar falls back to slow polling instead of failing, and `proxy_buffering off` on `/api/`, without which nginx writes the whole download to its own disk before it sends a byte.

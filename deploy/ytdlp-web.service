@@ -1,0 +1,55 @@
+[Unit]
+Description=ytdlp-web (yt-dlp download service behind nginx)
+Documentation=file:///opt/ytdlp-web/deploy/README.md
+# Start after the network has a routable address, not only after the stack loads.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ytdlp
+Group=ytdlp
+WorkingDirectory=/opt/ytdlp-web
+
+# The leading "-" lets the service start if the file is absent.
+# The file must exist in a real deployment, because YTDLP_WEB_PASSWORD is required.
+EnvironmentFile=-/etc/ytdlp-web.env
+
+ExecStart=/opt/ytdlp-web/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=3
+
+# Stop the process group, and kill it if it does not exit in 20 seconds.
+KillMode=mixed
+TimeoutStopSec=20
+
+# --- Hardening ---
+# Stops the service from gaining new privileges, for example through a setuid binary.
+NoNewPrivileges=yes
+# Gives the service its own /tmp, so temporary files of other services stay invisible.
+PrivateTmp=yes
+# Makes /usr, /boot and /etc read-only, so the service cannot change the system.
+ProtectSystem=strict
+# Hides /home, /root and /run/user, so user data stays out of reach.
+ProtectHome=yes
+# Removes access to physical devices, so only pseudo devices such as /dev/null remain.
+PrivateDevices=yes
+# Blocks writes to /proc/sys and /sys, so the service cannot tune the kernel.
+ProtectKernelTunables=yes
+# Makes the cgroup hierarchy read-only, so the service cannot change resource limits.
+ProtectControlGroups=yes
+# Removes the setuid and setgid bits on files the service creates.
+RestrictSUIDSGID=yes
+# Locks the execution domain, so the service cannot ask for a different personality.
+LockPersonality=yes
+# The only writable path: the download working directory.
+ReadWritePaths=/var/lib/ytdlp-web
+
+# Resource caps. One job needs about 3 times the final file size on disk.
+# Memory stays small, because yt-dlp and ffmpeg stream to disk.
+MemoryMax=1G
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

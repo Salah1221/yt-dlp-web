@@ -231,3 +231,14 @@ el("download").addEventListener("click", () => {
   // The server deletes the file after it sends. One download is possible.
   setTimeout(() => { hide(el("job")); jobId = null; }, 1500);
 });
+
+// The session cookie is HttpOnly, so the server has to say whether a login
+// is in use. Without a login the button stays hidden.
+fetch("/api/config").then((response) => response.json()).then((data) => {
+  if (data.login) show(el("logout"));
+}).catch(() => {});
+
+el("logout").addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  window.location.replace("/login");
+});

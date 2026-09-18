@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Log in</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="narrow">
+  <h1>yt-dlp web</h1>
+  <form id="login-form" class="card">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password"
+           required autofocus>
+    <button type="submit">Log in</button>
+  </form>
+  <p id="message" class="hidden"></p>
+</main>
+<script>
+"use strict";
+const form = document.getElementById("login-form");
+const message = document.getElementById("message");
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  message.classList.add("hidden");
+  const button = form.querySelector("button");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: document.getElementById("password").value }),
+    });
+    if (response.ok) {
+      window.location.replace("/");
+      return;
+    }
+    const data = await response.json();
+    message.textContent = data.detail || "the login failed";
+    message.classList.remove("hidden");
+  } catch (error) {
+    message.textContent = "the server did not answer";
+    message.classList.remove("hidden");
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -24,6 +24,10 @@ body {
 
 main { max-width: 46rem; margin: 0 auto; }
 
+header { display: flex; align-items: center; justify-content: space-between;
+         gap: 1rem; margin-bottom: 1.5rem; }
+header h1 { margin: 0; }
+#logout { padding: 0.4rem 0.8rem; min-height: 0; font-size: 0.9rem; }
 h1 { font-size: 1.4rem; letter-spacing: 0.02em; margin: 0 0 1.5rem; }
 h2 { font-size: 1.05rem; margin: 0 0 0.25rem; overflow-wrap: anywhere; }
 
@@ -116,7 +120,8 @@ th { color: var(--dim); font-weight: 500; }
 /* Phone layout. Every control goes full width and stacks. */
 @media (max-width: 640px) {
   body { padding: 1rem 1rem 3rem; }
-  h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+  h1 { font-size: 1.25rem; }
+  header { margin-bottom: 1rem; }
 
   #probe-form { flex-direction: column; }
 
@@ -164,3 +169,20 @@ th { color: var(--dim); font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   #fill { transition: none; }
 }
+
+/* The login page. */
+main.narrow { max-width: 22rem; }
+#login-form { display: flex; flex-direction: column; gap: 0.75rem; }
+#login-form label { color: var(--dim); font-size: 0.9rem; }
+#login-form input {
+  padding: 0.7rem 0.9rem;
+  min-height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+}
+#login-form input:focus { outline: 2px solid var(--accent); }
+#login-form button { background: var(--accent); border-color: var(--accent); color: #06101f; }

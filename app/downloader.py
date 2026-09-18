@@ -6,7 +6,7 @@ from pathlib import Path
 
 from yt_dlp import YoutubeDL
 
-from . import jobs
+from . import config, jobs, urlguard
 
 # yt-dlp writes these while a download runs. They are never the result.
 SKIP_SUFFIXES = (".part", ".ytdl", ".temp")
@@ -19,6 +19,7 @@ OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 
 def build_opts(mode: str, workdir: str, format_id: str | None = None,
                max_height: int | None = None,
+               max_filesize: int | None = None,
                progress_hook=None, postprocessor_hook=None) -> dict:
     """Return the yt-dlp options for one job."""
     if mode not in MODES:
@@ -43,6 +44,10 @@ def build_opts(mode: str, workdir: str, format_id: str | None = None,
         "progress_hooks": [progress_hook] if progress_hook else [],
         "postprocessor_hooks": [postprocessor_hook] if postprocessor_hook else [],
     }
+
+    if max_filesize:
+        # yt-dlp stops the download when a stream passes this size.
+        opts["max_filesize"] = max_filesize
 
     if mode == "video":
         if max_height:
@@ -150,10 +155,15 @@ def _format_row(item: dict) -> dict:
 
 def probe(url: str) -> dict:
     """Read the video data without a download."""
+    allow_private = not config.block_private_addresses()
+    urlguard.check_url(url, allow_private=allow_private)
     opts = {"quiet": True, "no_warnings": True, "skip_download": True,
             "noplaylist": True}
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    # The guard stays on for the whole call, so a redirect to a private
+    # address is refused at connection time as well.
+    with urlguard.guarded(allow_private=allow_private):
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
     if info is None:
         raise ValueError("this URL gives no video")
     if info.get("_type") == "playlist":
@@ -202,13 +212,17 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
         store.update(job.id, state=jobs.CONVERTING, speed=None, eta=None)
         send()
 
+    allow_private = not config.block_private_addresses()
     opts = build_opts(job.mode, job.workdir, job.format_id,
                       max_height=job.max_height,
+                      max_filesize=config.max_filesize(),
                       progress_hook=progress_hook,
                       postprocessor_hook=postprocessor_hook)
     try:
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(job.url, download=True)
+        urlguard.check_url(job.url, allow_private=allow_private)
+        with urlguard.guarded(allow_private=allow_private):
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(job.url, download=True)
     except jobs.JobCancelled:
         jobs.delete_workdir(job)
         store.remove(job.id)

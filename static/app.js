@@ -68,6 +68,7 @@ el("probe-form").addEventListener("submit", async (event) => {
     } else {
       hide(el("thumb"));
     }
+    fillQualities(info.qualities);
     fillFormats(info.formats);
     show(el("video"));
   } catch (error) {
@@ -78,10 +79,31 @@ el("probe-form").addEventListener("submit", async (event) => {
   }
 });
 
+function fillQualities(qualities) {
+  const select = el("quality");
+  const list = qualities || [];
+  select.textContent = "";
+  const best = document.createElement("option");
+  best.value = "";
+  best.textContent = "Best quality";
+  select.appendChild(best);
+  list.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.height);
+    // The size is an estimate. A site that reports none gives the height alone.
+    option.textContent = item.filesize
+      ? `${item.label}, about ${humanSize(item.filesize)}`
+      : item.label;
+    select.appendChild(option);
+  });
+  select.disabled = list.length === 0;
+}
+
 function fillFormats(formats) {
   const body = el("format-rows");
+  const labels = ["Format", "Type", "Size", ""];
   body.textContent = "";
-  formats.forEach((item) => {
+  (formats || []).forEach((item) => {
     const row = document.createElement("tr");
     const kind = item.vcodec && item.vcodec !== "none"
       ? (item.acodec && item.acodec !== "none" ? "video and audio" : "video only")
@@ -89,14 +111,16 @@ function fillFormats(formats) {
     const cells = [
       `${item.resolution} ${item.ext}${item.fps ? " " + item.fps + "fps" : ""}`,
       kind,
-      humanSize(item.filesize),
+      humanSize(item.filesize) || "unknown",
     ];
-    cells.forEach((text) => {
+    cells.forEach((text, index) => {
       const cell = document.createElement("td");
+      cell.setAttribute("data-label", labels[index]);
       cell.textContent = text;
       row.appendChild(cell);
     });
     const action = document.createElement("td");
+    action.setAttribute("data-label", labels[3]);
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "Get";
@@ -123,12 +147,16 @@ async function startJob(mode, formatId) {
   el("state").textContent = "Starting";
   el("stats").textContent = "";
   show(el("job"));
+  const body = { url: currentUrl, mode: mode, format_id: formatId };
+  if (mode === "video") {
+    const chosen = parseInt(el("quality").value, 10);
+    if (chosen > 0) body.max_height = chosen;
+  }
   try {
-    const data = await postJson("/api/jobs", {
-      url: currentUrl, mode: mode, format_id: formatId,
-    });
+    const data = await postJson("/api/jobs", body);
     jobId = data.job_id;
     watch(jobId);
+    el("job").scrollIntoView({ block: "nearest" });
   } catch (error) {
     fail(error.message);
     hide(el("job"));

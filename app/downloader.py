@@ -18,12 +18,19 @@ OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 
 
 def build_opts(mode: str, workdir: str, format_id: str | None = None,
+               max_height: int | None = None,
                progress_hook=None, postprocessor_hook=None) -> dict:
     """Return the yt-dlp options for one job."""
     if mode not in MODES:
         raise ValueError(f"unknown mode: {mode}")
     if mode == "format" and not format_id:
         raise ValueError("mode 'format' needs a format_id")
+    if max_height is not None:
+        # bool is a subclass of int, so it needs its own check.
+        if isinstance(max_height, bool) or not isinstance(max_height, int):
+            raise ValueError("max_height must be a whole number")
+        if max_height <= 0:
+            raise ValueError("max_height must be more than zero")
 
     opts: dict = {
         "outtmpl": str(Path(workdir) / OUTPUT_TEMPLATE),
@@ -38,7 +45,14 @@ def build_opts(mode: str, workdir: str, format_id: str | None = None,
     }
 
     if mode == "video":
-        opts["format"] = "bv*+ba/b"
+        if max_height:
+            # The last branch is a safety fallback. The page only offers a
+            # height that the video has, so it should never run. It stops an
+            # odd site from turning a quality choice into a hard failure.
+            opts["format"] = (f"bv*[height<={max_height}]+ba/"
+                              f"b[height<={max_height}]/bv*+ba/b")
+        else:
+            opts["format"] = "bv*+ba/b"
         opts["merge_output_format"] = "mp4"
         # faststart moves the MP4 index to the front, so the file seeks fast.
         opts["postprocessor_args"] = {"merger": ["-movflags", "+faststart"]}
@@ -67,6 +81,52 @@ def find_output(workdir: str | Path) -> Path | None:
     if not finished:
         return None
     return max(finished, key=lambda item: item.stat().st_size)
+
+
+def _size(item: dict) -> int | None:
+    """Return the reported size of one format, exact or approximate."""
+    return item.get("filesize") or item.get("filesize_approx")
+
+
+def _is_audio_only(item: dict) -> bool:
+    vcodec = item.get("vcodec") or "none"
+    acodec = item.get("acodec") or "none"
+    return vcodec == "none" and acodec != "none"
+
+
+def _is_real_height(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def build_qualities(formats: list[dict]) -> list[dict]:
+    """Return one entry per video height, largest height first.
+
+    The size is an estimate. It adds the largest video of that height to
+    the largest audio the site reports. A site that reports no size gives
+    an entry with no size, and the page then shows the height alone.
+    """
+    best_audio = 0
+    for item in formats or []:
+        if _is_audio_only(item):
+            size = _size(item) or 0
+            best_audio = max(best_audio, size)
+
+    largest: dict[int, int | None] = {}
+    for item in formats or []:
+        if (item.get("vcodec") or "none") == "none":
+            continue
+        height = item.get("height")
+        if not _is_real_height(height):
+            continue
+        size = _size(item)
+        current = largest.get(height)
+        if height not in largest or (size or 0) > (current or 0):
+            largest[height] = size
+
+    return [{"height": height,
+             "label": f"{height}p",
+             "filesize": (largest[height] + best_audio) if largest[height] else None}
+            for height in sorted(largest, reverse=True)]
 
 
 def _format_row(item: dict) -> dict:
@@ -108,6 +168,7 @@ def probe(url: str) -> dict:
         "duration": info.get("duration"),
         "thumbnail": info.get("thumbnail"),
         "formats": formats,
+        "qualities": build_qualities(info.get("formats") or []),
     }
 
 
@@ -142,7 +203,9 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
         send()
 
     opts = build_opts(job.mode, job.workdir, job.format_id,
-                      progress_hook, postprocessor_hook)
+                      max_height=job.max_height,
+                      progress_hook=progress_hook,
+                      postprocessor_hook=postprocessor_hook)
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(job.url, download=True)

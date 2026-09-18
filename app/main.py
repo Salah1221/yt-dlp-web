@@ -27,6 +27,7 @@ class JobRequest(BaseModel):
     url: str
     mode: str
     format_id: str | None = None
+    max_height: int | None = None
 
 
 def content_disposition(filename: str) -> str:
@@ -87,7 +88,11 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
         if request.mode == "format" and not request.format_id:
             raise HTTPException(status_code=400,
                                 detail="mode 'format' needs a format_id")
-        job = job_store.create(request.url, request.mode, request.format_id)
+        if request.max_height is not None and request.max_height <= 0:
+            raise HTTPException(status_code=400,
+                                detail="max_height must be more than zero")
+        job = job_store.create(request.url, request.mode, request.format_id,
+                               request.max_height)
         asyncio.create_task(asyncio.to_thread(downloader.run, job, job_store))
         return {"job_id": job.id}
 

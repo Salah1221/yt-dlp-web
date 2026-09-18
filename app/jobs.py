@@ -34,6 +34,7 @@ class Job:
     url: str
     mode: str
     format_id: Optional[str] = None
+    max_height: Optional[int] = None
     state: str = QUEUED
     percent: float = 0.0
     speed: Optional[float] = None
@@ -65,12 +66,13 @@ class JobStore:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
 
-    def create(self, url: str, mode: str, format_id: str | None = None) -> Job:
+    def create(self, url: str, mode: str, format_id: str | None = None,
+               max_height: int | None = None) -> Job:
         job_id = uuid.uuid4().hex
         workdir = self._root / job_id
         workdir.mkdir(parents=True, exist_ok=True)
         job = Job(id=job_id, url=url, mode=mode, format_id=format_id,
-                  workdir=str(workdir))
+                  max_height=max_height, workdir=str(workdir))
         with self._lock:
             self._jobs[job_id] = job
         return job

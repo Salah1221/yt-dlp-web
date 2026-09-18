@@ -96,13 +96,13 @@ The job id is a random UUID in hexadecimal form. The work directory name comes f
 
 ### 6.3 downloader.py
 
-`probe(url)` calls `extract_info(url, download=False)`. It returns the title, the duration, the thumbnail, and a cleaned list of formats. Each format entry holds the format id, the extension, the resolution, the frame rate, the video codec, the audio codec, the file size, and a note.
+`probe(url)` calls `extract_info(url, download=False)`. It returns the title, the duration, the thumbnail, a cleaned list of formats, and a quality list. Each format entry holds the format id, the extension, the resolution, the frame rate, the video codec, the audio codec, the file size, and a note.
 
 `build_opts(mode, format_id, workdir, hooks)` returns the yt-dlp options.
 
 | Mode | Format string | Post-processing |
 |---|---|---|
-| `video` | `bv*+ba/b` | merge to MP4, ffmpeg argument `-movflags +faststart` |
+| `video` | `bv*+ba/b`, or `bv*[height<=N]+ba/b[height<=N]/bv*+ba/b` when the person picks a quality | merge to MP4, ffmpeg argument `-movflags +faststart` |
 | `audio` | `ba/b` | `FFmpegExtractAudio`, codec `mp3`, quality 192 |
 | `format` | `<id>+ba/<id>` | none |
 
@@ -113,6 +113,24 @@ The `format` mode does not force a container. If the selected video format and t
 `run(job, store)` executes the download in a worker thread. It records the final path from the `postprocessor_hooks` callback. If that callback gives no path, the function scans the work directory and selects the one file that is not a `.part` file and not a `.ytdl` file.
 
 To cancel a job, the server sets a flag on the job record. The progress callback reads the flag on each call, and it raises a `JobCancelled` exception. That exception stops the yt-dlp run from inside. `run` catches the exception, deletes the work directory, and removes the job.
+
+### 6.3.1 The quality list
+
+`build_qualities(formats)` returns one entry for each video height. Each entry holds the height, a label such as `1080p`, and an estimated size.
+
+The rules are:
+
+1. Keep only a format that has a video codec and a whole number height that is more than zero.
+2. Group these formats by height, and keep the largest reported size in each group.
+3. Find the largest reported size of an audio-only format.
+4. Add the audio size to each video size. This gives the estimate, because the page downloads a video stream and an audio stream together.
+5. Sort from the highest height to the lowest.
+
+A format that reports no size gives an entry with no size. The page then shows the height alone. The size is an estimate. It does not include the container overhead, and a site does not always report a size.
+
+The application builds this list in Python, not in the page, so the tests can prove the rules.
+
+The `max_height` value must be a whole number that is more than zero. The route answers 400 for any other value.
 
 ### 6.4 cleanup.py
 
@@ -139,6 +157,10 @@ The application lifespan starts the janitor task, and it stops the task at shutd
 ### 6.6 Front end
 
 One page holds a URL box, a Check button, the title and the thumbnail, three choices, a progress bar, and a Download button. The third choice opens a table of formats.
+
+A select list sits beside the Video MP4 button. The first option is "Best quality". Each other option shows a height and an estimated size, such as `1080p, about 94 MB`. The page sends the selected height as `max_height`.
+
+The page works on a phone. Below 640 pixels every control goes full width and stacks, the thumbnail goes above the title, and the format table becomes one card for each row, because a four column table cannot be read at that width. Every control is at least 44 pixels high. The URL box uses a 16 pixel font, because a smaller font makes iOS Safari zoom in when the field takes focus. The hover style applies only where a real pointer exists.
 
 The page opens a WebSocket when a job starts. If the socket closes before the job ends, the page polls `GET /api/jobs/{id}` every 2 seconds. The job continues in both cases.
 

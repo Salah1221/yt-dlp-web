@@ -73,3 +73,20 @@ def test_a_cancelled_run_removes_the_job_and_the_folder(store, media_url, tmp_pa
     downloader.run(job, store)
     assert store.get(job.id) is None
     assert not (tmp_path / job.id).exists()
+
+
+def test_probe_reports_a_quality_list(media_url):
+    info = downloader.probe(media_url)
+    assert isinstance(info["qualities"], list)
+    for item in info["qualities"]:
+        assert set(item) == {"height", "label", "filesize"}
+        assert item["label"].endswith("p")
+
+
+def test_run_with_a_max_height_produces_a_file(store, media_url):
+    job = store.create(media_url, "video", max_height=240)
+    assert job.max_height == 240
+    downloader.run(job, store)
+    done = store.get(job.id)
+    assert done.state == jobs.READY, done.error
+    assert done.file_path

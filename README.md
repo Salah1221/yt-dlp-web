@@ -27,9 +27,17 @@ Then open <http://127.0.0.1:8000>.
 
 1. Paste a video URL.
 2. Press Check. The page shows the title and the length.
-3. Press Video MP4, or Audio MP3, or Choose a format.
-4. Watch the bar. The state goes from Downloading to Converting.
-5. Press Download. Your browser saves the file.
+3. Pick a quality in the list beside Video MP4, or leave it on Best quality.
+4. Press Video MP4, or Audio MP3, or Choose a format.
+5. Watch the bar. The state goes from Downloading to Converting.
+6. Press Download. Your browser saves the file.
+
+The size beside each quality is an estimate. It comes from what the site reports,
+it leaves out the container overhead, and a site that reports no size shows the
+height alone.
+
+The page works on a phone. The server binds to `127.0.0.1`, so a phone cannot
+reach it from your network without a change to the binding.
 
 The server deletes its copy after the browser download completes. A download
 that you never collect is deleted after 30 minutes.

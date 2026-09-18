@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <title>yt-dlp web</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -11,8 +12,8 @@
   <h1>yt-dlp web</h1>
 
   <form id="probe-form">
-    <input id="url" type="url" placeholder="Paste a video URL" required
-           autocomplete="off" spellcheck="false">
+    <input id="url" type="url" inputmode="url" placeholder="Paste a video URL"
+           required autocomplete="off" autocapitalize="off" spellcheck="false">
     <button id="check" type="submit">Check</button>
   </form>
 
@@ -20,13 +21,20 @@
 
   <section id="video" class="card hidden">
     <img id="thumb" alt="">
-    <div>
+    <div class="details">
       <h2 id="title"></h2>
       <p id="duration"></p>
       <div class="actions">
-        <button data-mode="video" type="button">Video MP4</button>
-        <button data-mode="audio" type="button">Audio MP3</button>
-        <button id="toggle-formats" type="button">Choose a format</button>
+        <div class="action-row">
+          <button data-mode="video" type="button">Video MP4</button>
+          <select id="quality" aria-label="Video quality">
+            <option value="">Best quality</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button data-mode="audio" type="button">Audio MP3</button>
+          <button id="toggle-formats" type="button">Choose a format</button>
+        </div>
       </div>
     </div>
   </section>
@@ -44,8 +52,10 @@
     <p id="state">Starting</p>
     <div class="bar"><div id="fill"></div></div>
     <p id="stats"></p>
-    <a id="download" class="button hidden" download>Download</a>
-    <button id="cancel" type="button">Cancel</button>
+    <div class="job-actions">
+      <a id="download" class="button hidden" download>Download</a>
+      <button id="cancel" type="button">Cancel</button>
+    </div>
   </section>
 </main>
 <script src="/static/app.js"></script>

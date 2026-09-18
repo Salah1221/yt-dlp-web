@@ -6,6 +6,7 @@
   --dim: #98a0b0;
   --accent: #5b9cff;
   --bad: #ff6b6b;
+  --tap: 44px;
 }
 
 * { box-sizing: border-box; }
@@ -13,32 +14,42 @@
 body {
   margin: 0;
   padding: 2rem 1rem 4rem;
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
   background: var(--bg);
   color: var(--text);
   font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
 }
 
 main { max-width: 46rem; margin: 0 auto; }
 
 h1 { font-size: 1.4rem; letter-spacing: 0.02em; margin: 0 0 1.5rem; }
-h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.05rem; margin: 0 0 0.25rem; overflow-wrap: anywhere; }
 
 #probe-form { display: flex; gap: 0.5rem; }
 
-input[type="url"] {
-  flex: 1;
+input[type="url"], select {
   padding: 0.7rem 0.9rem;
+  min-height: var(--tap);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
   color: var(--text);
-  font-size: 1rem;
+  /* 16px stops iOS Safari zooming in when the field takes focus. */
+  font-size: 16px;
+  font-family: inherit;
 }
 
-input[type="url"]:focus { outline: 2px solid var(--accent); }
+input[type="url"] { flex: 1; min-width: 0; }
+input[type="url"]:focus, select:focus, button:focus-visible, .button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 button, .button {
   padding: 0.7rem 1rem;
+  min-height: var(--tap);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
@@ -46,11 +57,13 @@ button, .button {
   font: inherit;
   cursor: pointer;
   text-decoration: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
 }
 
-button:hover, .button:hover { border-color: var(--accent); }
-button:disabled { opacity: 0.5; cursor: default; }
+button:disabled, select:disabled { opacity: 0.5; cursor: default; }
 
 #check, #download { background: var(--accent); border-color: var(--accent); color: #06101f; }
 
@@ -63,10 +76,16 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 
 #video { display: flex; gap: 1rem; align-items: flex-start; }
+.details { flex: 1; min-width: 0; }
 #thumb { width: 160px; border-radius: 6px; background: var(--line); }
 #duration { color: var(--dim); margin: 0 0 0.75rem; font-size: 0.9rem; }
 
-.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.actions { display: flex; flex-direction: column; gap: 0.5rem; }
+.action-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.action-row > * { flex: 1 1 auto; }
+#quality { flex: 1 1 12rem; }
+
+.job-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
@@ -76,8 +95,72 @@ th { color: var(--dim); font-weight: 500; }
 .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
 #fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 #state { margin: 0 0 0.6rem; }
-#stats { color: var(--dim); font-size: 0.9rem; min-height: 1.5rem; }
+#stats { color: var(--dim); font-size: 0.9rem; min-height: 1.5rem; overflow-wrap: anywhere; }
 
-#message { padding: 0.75rem 1rem; border-radius: 8px; background: #2a1c1f; color: var(--bad); }
+#message {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #2a1c1f;
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
 
 .hidden { display: none; }
+
+/* A pointer can hover. A touch screen cannot, so the hover style only
+   applies where a real pointer exists. */
+@media (hover: hover) {
+  button:hover, .button:hover { border-color: var(--accent); }
+}
+
+/* Phone layout. Every control goes full width and stacks. */
+@media (max-width: 640px) {
+  body { padding: 1rem 1rem 3rem; }
+  h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+
+  #probe-form { flex-direction: column; }
+
+  #video { flex-direction: column; align-items: stretch; }
+  #thumb { width: 100%; max-width: 100%; }
+
+  .action-row { flex-direction: column; }
+  .action-row > * { width: 100%; }
+
+  .job-actions { flex-direction: column; }
+  .job-actions > * { width: 100%; }
+
+  /* A four column table cannot be read at this width, so each row
+     becomes a card and every cell carries its own heading. */
+  #formats { max-height: none; }
+  #formats table, #formats tbody, #formats tr, #formats td { display: block; width: 100%; }
+  #formats thead { display: none; }
+
+  #formats tr {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+
+  #formats td {
+    border: 0;
+    padding: 0.2rem 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  #formats td::before {
+    content: attr(data-label);
+    color: var(--dim);
+    flex: 0 0 auto;
+  }
+
+  #formats td:last-child { padding-top: 0.5rem; }
+  #formats td:last-child::before { content: ""; }
+  #formats td:last-child button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #fill { transition: none; }
+}

@@ -133,3 +133,24 @@ def test_a_second_download_gets_404(client, store, tmp_path):
     job = _ready_job(store, tmp_path)
     client.get(f"/api/jobs/{job.id}/file")
     assert client.get(f"/api/jobs/{job.id}/file").status_code == 404
+
+
+def test_start_job_accepts_a_max_height(client, store, media_url):
+    response = client.post("/api/jobs", json={
+        "url": media_url, "mode": "video", "max_height": 240})
+    assert response.status_code == 200
+    job = store.get(response.json()["job_id"])
+    assert job is None or job.max_height == 240
+
+
+def test_start_job_rejects_a_max_height_that_is_not_positive(client):
+    for bad in (0, -1):
+        response = client.post("/api/jobs", json={
+            "url": "http://x/y.mp4", "mode": "video", "max_height": bad})
+        assert response.status_code == 400
+
+
+def test_start_job_rejects_a_max_height_that_is_not_a_number(client):
+    response = client.post("/api/jobs", json={
+        "url": "http://x/y.mp4", "mode": "video", "max_height": "tall"})
+    assert response.status_code == 422

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from yt_dlp import YoutubeDL
+
+from . import jobs
+
 # yt-dlp writes these while a download runs. They are never the result.
 SKIP_SUFFIXES = (".part", ".ytdl", ".temp")
 
@@ -63,3 +67,101 @@ def find_output(workdir: str | Path) -> Path | None:
     if not finished:
         return None
     return max(finished, key=lambda item: item.stat().st_size)
+
+
+def _format_row(item: dict) -> dict:
+    """Turn one yt-dlp format entry into the fields the page shows."""
+    width = item.get("width")
+    height = item.get("height")
+    resolution = item.get("resolution")
+    if not resolution:
+        resolution = f"{width}x{height}" if width and height else "audio only"
+    return {
+        "format_id": item.get("format_id"),
+        "ext": item.get("ext"),
+        "resolution": resolution,
+        "fps": item.get("fps"),
+        "vcodec": item.get("vcodec"),
+        "acodec": item.get("acodec"),
+        "filesize": item.get("filesize") or item.get("filesize_approx"),
+        "note": item.get("format_note") or "",
+    }
+
+
+def probe(url: str) -> dict:
+    """Read the video data without a download."""
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+            "noplaylist": True}
+    with YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if info is None:
+        raise ValueError("this URL gives no video")
+    if info.get("_type") == "playlist":
+        entries = [entry for entry in (info.get("entries") or []) if entry]
+        if not entries:
+            raise ValueError("this URL holds no video")
+        info = entries[0]
+    formats = [_format_row(item) for item in (info.get("formats") or [])
+               if item.get("format_id")]
+    return {
+        "title": info.get("title") or "video",
+        "duration": info.get("duration"),
+        "thumbnail": info.get("thumbnail"),
+        "formats": formats,
+    }
+
+
+def run(job: jobs.Job, store: jobs.JobStore) -> None:
+    """Download one job. This function blocks, so call it in a thread."""
+
+    def send() -> None:
+        current = store.get(job.id)
+        if current is not None:
+            store.publish(job.id, current.public())
+
+    def progress_hook(data: dict) -> None:
+        current = store.get(job.id)
+        if current is None or current.cancelled:
+            raise jobs.JobCancelled()
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate")
+            done = data.get("downloaded_bytes") or 0
+            percent = (done / total * 100) if total else 0.0
+            store.update(job.id, state=jobs.DOWNLOADING,
+                         percent=round(percent, 1), speed=data.get("speed"),
+                         eta=data.get("eta"))
+        elif status == "finished":
+            store.update(job.id, state=jobs.CONVERTING, percent=100.0,
+                         speed=None, eta=None)
+        send()
+
+    def postprocessor_hook(data: dict) -> None:
+        # ffmpeg gives no percent, so the page only shows the state.
+        store.update(job.id, state=jobs.CONVERTING, speed=None, eta=None)
+        send()
+
+    opts = build_opts(job.mode, job.workdir, job.format_id,
+                      progress_hook, postprocessor_hook)
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(job.url, download=True)
+    except jobs.JobCancelled:
+        jobs.delete_workdir(job)
+        store.remove(job.id)
+        return
+    except Exception as error:  # yt-dlp raises many types
+        store.update(job.id, state=jobs.ERROR, error=str(error))
+        send()
+        jobs.delete_workdir(job)
+        return
+
+    output = find_output(job.workdir)
+    if output is None:
+        store.update(job.id, state=jobs.ERROR,
+                     error="the download produced no file")
+    else:
+        store.update(job.id, state=jobs.READY, percent=100.0, speed=None,
+                     eta=None, title=(info or {}).get("title"),
+                     filename=output.name, file_path=str(output))
+    send()

@@ -1,6 +1,6 @@
 name: deploy
 
-# The deploy runs only after the tests pass on main. A manual run is also
+# The deploy runs after the tests pass on main. A manual run is also
 # possible, for example to put the server back on the current commit.
 on:
   workflow_run:
@@ -21,7 +21,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: production
 
     env:
@@ -33,54 +33,120 @@ jobs:
       PUBLIC_URL: ${{ vars.PUBLIC_URL }}
 
     steps:
-      - name: Write the SSH key and the known host
+      # Deploy the exact commit that the tests ran against. The head of the
+      # branch can move while the tests run, and deploying the branch head
+      # would then ship code that nothing tested.
+      - name: Check out the commit that passed the tests
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            ${{ github.event_name == 'workflow_run'
+                && github.event.workflow_run.head_sha
+                || github.sha }}
+
+      - name: Prepare the SSH key
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # The known host line pins the server. Without it, StrictHostKeyChecking
-          # cannot tell your server from a machine that answers in its place.
+          # This line pins the server. Without it, any machine that answers
+          # on that address could receive the deploy.
           printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${DEPLOY_HOST}
+            User ${DEPLOY_USER}
+            Port ${DEPLOY_PORT}
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 15
+            ServerAliveInterval 20
+            ServerAliveCountMax 6
+          EOF
+          chmod 600 ~/.ssh/config
 
-      - name: Update the code and restart the service
+      # Fail here, with a clear message, rather than inside rsync.
+      - name: Check the connection
+        run: ssh deploy-target 'echo "connected to $(hostname)"'
+
+      # The runner already holds the code, so it sends the files itself.
+      # The server never contacts GitHub and holds no GitHub credential.
+      - name: Send the code
         run: |
-          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes \
-              -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-              bash -s "$DEPLOY_PATH" "$SERVICE_NAME" <<'REMOTE'
+          set -euo pipefail
+          rsync --archive --compress --delete --human-readable \
+                --exclude '.git/' \
+                --exclude '.venv/' \
+                --exclude '__pycache__/' \
+                --exclude '.pytest_cache/' \
+                --exclude 'work/' \
+                ./ "deploy-target:${DEPLOY_PATH}/"
+
+      - name: Install the dependencies and restart the service
+        run: |
+          set -euo pipefail
+          ssh deploy-target bash -s -- "$DEPLOY_PATH" "$SERVICE_NAME" <<'REMOTE'
           set -euo pipefail
           target="$1"
           service="$2"
-
           cd "$target"
 
-          # The server holds no local edits. The deploy makes the working
-          # tree match the commit that passed the tests.
-          git fetch --prune origin
-          git reset --hard origin/main
+          # The first deploy makes the virtual environment. Later deploys
+          # reuse it, because rsync never touches it.
+          if [ ! -x .venv/bin/python ]; then
+            echo "making the virtual environment"
+            python3 -m venv .venv
+            .venv/bin/python -m pip install --quiet --upgrade pip
+          fi
 
-          .venv/bin/python -m pip install --quiet --upgrade -r requirements.txt
+          .venv/bin/python -m pip install --quiet --upgrade --requirement requirements.txt
 
+          # The outbound address guard wraps the Python socket layer. An HTTP
+          # backend written in C never reaches that wrapper.
           if .venv/bin/python -m pip list --format=freeze | grep -qiE '^curl[-_]cffi'; then
             echo "curl_cffi is installed. It bypasses the outbound address guard." >&2
             exit 1
           fi
 
           sudo -n /usr/bin/systemctl restart "$service"
-          sleep 2
-          sudo -n /usr/bin/systemctl is-active --quiet "$service"
-          echo "$service is running commit $(git rev-parse --short HEAD)"
+
+          # Wait for the unit to report that it is up. A fixed sleep either
+          # wastes time or reports success too early.
+          for attempt in $(seq 1 30); do
+            if sudo -n /usr/bin/systemctl is-active --quiet "$service"; then
+              echo "$service is active after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "$service did not come back within 30s" >&2
+          exit 1
           REMOTE
 
+      # The service being up is not the same as the site being reachable.
+      # This checks the whole path, including nginx and the certificate.
       - name: Check that the site answers
         if: env.PUBLIC_URL != ''
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$PUBLIC_URL/login")
-          echo "GET $PUBLIC_URL/login returned $code"
-          # 200 is the login page. Any other code means the deploy did not work.
-          test "$code" = "200"
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${PUBLIC_URL}/login" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "GET ${PUBLIC_URL}/login returned 200"
+              exit 0
+            fi
+            echo "attempt ${attempt}: got ${code}"
+            sleep 3
+          done
+          echo "the site did not answer 200" >&2
+          exit 1
 
       - name: Remove the key
         if: always()
-        run: rm -f ~/.ssh/id_ed25519
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/config

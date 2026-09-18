@@ -5,36 +5,58 @@ Two workflows live in `.github/workflows`.
 | Workflow | When it runs | What it does |
 |---|---|---|
 | `tests.yml` | every push to `main`, every pull request, or by hand | installs ffmpeg, installs the dependencies, refuses a C level HTTP backend, runs pytest |
-| `deploy.yml` | after `tests` passes on `main`, or by hand | connects to the server, updates the code, installs the dependencies, restarts the service, checks that the site answers |
+| `deploy.yml` | after `tests` passes on `main`, or by hand | sends the code to the server with rsync, installs the dependencies, restarts the service, checks that the site answers |
 
 The deploy runs only when the tests pass. A red test run stops it.
 
-## What the deploy does on the server
+## The code travels from the runner, not from GitHub
 
-1. `git fetch` and `git reset --hard origin/main`. The server holds no local edits.
-2. `pip install --upgrade -r requirements.txt` inside the virtual environment.
-3. Refuses to continue if `curl_cffi` is installed, because it bypasses the outbound address guard.
-4. `systemctl restart`, then `systemctl is-active` to prove the service came back.
-5. From the runner, `GET /login` on your domain must answer 200.
+The runner already holds the code, because it checked it out to run the tests. It sends those files straight to the server with rsync over the same SSH connection.
 
-**Warning:** step 1 deletes any change you made on the server by hand. Make every change in the repository.
+The server therefore needs no GitHub credential and no outbound access to GitHub. The only key on the server is the one that GitHub Actions uses to log in.
+
+The deploy checks out the exact commit that the tests ran against, not the head of the branch. The head can move while the tests run, and deploying the head would ship code that nothing tested.
+
+## What the deploy does, step by step
+
+1. Checks out the tested commit.
+2. Writes the SSH key and the pinned host key.
+3. Opens one test connection, so a login fault fails with a clear message.
+4. `rsync --archive --delete`, excluding `.git`, `.venv`, `__pycache__`, `.pytest_cache`, and `work`.
+5. Makes the virtual environment if it is absent, then installs the requirements.
+6. Refuses to continue if `curl_cffi` is present, because it bypasses the outbound address guard.
+7. Restarts the service, then polls `systemctl is-active` for up to 30 seconds.
+8. Requests `/login` on your domain until it answers 200, up to 10 times.
+9. Deletes the key from the runner.
+
+**Warning:** step 4 uses `--delete`. Any file you add inside the deploy path by hand is removed on the next deploy. The excluded folders are safe, and so is everything outside that path, such as `/etc/ytdlp-web.env`, the certificate, and the nginx site file.
 
 ## Set up the server
 
 Run these on the VPS, as a user with sudo.
 
-### 1. Make the deploy user
-
-The service user `ytdlp` has no shell, so it cannot receive an SSH connection. The deploy needs its own user.
+### 1. Packages
 
 ```bash
+sudo apt update
+sudo apt install -y python3-venv python3-pip ffmpeg nginx rsync
+```
+
+### 2. Users and folders
+
+The service user has no shell, so it cannot receive an SSH connection. The deploy user is separate and exists only for GitHub Actions.
+
+```bash
+sudo adduser --system --group --no-create-home --disabled-login ytdlp
 sudo adduser --disabled-password --gecos "" deploy
-sudo mkdir -p /opt/ytdlp-web
+
+sudo mkdir -p /opt/ytdlp-web /var/lib/ytdlp-web/work
 sudo chown -R deploy:deploy /opt/ytdlp-web
+sudo chown -R ytdlp:ytdlp /var/lib/ytdlp-web
 sudo chmod 755 /opt/ytdlp-web
 ```
 
-### 2. Let the deploy user restart one service and nothing else
+### 3. Let the deploy user restart one service and nothing else
 
 Find the real path first, because it differs between distributions.
 
@@ -54,29 +76,15 @@ sudo visudo -c
 
 This user can restart that one service. It cannot become root, and it cannot touch any other service.
 
-### 3. Clone the code and make the virtual environment
+### 4. The key that GitHub Actions uses
 
-```bash
-sudo -u deploy -H bash
-cd /opt/ytdlp-web
-git clone <YOUR-REPOSITORY-URL> .
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
-exit
-```
-
-If the repository is private, the server needs its own read key. Make one as the `deploy` user with `ssh-keygen -t ed25519 -C "ytdlp-web server"`, then add the public key to the repository under Settings, Deploy keys, with write access off.
-
-### 4. Make the key that GitHub Actions uses
-
-Make this key on your own machine, not on the server. The private half goes into GitHub. The public half goes onto the server.
+Make this key on your own machine. The private half goes into GitHub. The public half goes onto the server.
 
 ```bash
 ssh-keygen -t ed25519 -f ytdlp-deploy-key -C "github actions deploy" -N ""
 ```
 
-Put the public half on the server:
+Put the public half on the server, then fix the permissions. OpenSSH refuses a key file that other users can read.
 
 ```bash
 sudo -u deploy mkdir -p /home/deploy/.ssh
@@ -87,11 +95,36 @@ sudo -u deploy chmod 600 /home/deploy/.ssh/authorized_keys
 
 ### 5. Read the server host key
 
-Run this on your own machine. It gives the line that pins your server, so the runner cannot be sent to a different machine.
+Run this on your own machine. It gives the line that pins your server.
 
 ```bash
-ssh-keyscan -p 22 -t ed25519 your.server.address
+ssh-keyscan -t ed25519 your.server.address
 ```
+
+On Windows, use the OpenSSH client that Git installs. The Microsoft client offers a key exchange that it cannot perform, and the scan then returns nothing:
+
+```bash
+"/c/Program Files/Git/usr/bin/ssh-keyscan.exe" -t ed25519 your.server.address
+```
+
+### 6. The service, the settings, and nginx
+
+Copy three files from your own checkout, because the server has no copy yet:
+
+```bash
+scp deploy/ytdlp-web.service deploy/nginx.conf deploy/ytdlp-web.env.example \
+    you@your.server.address:/tmp/
+```
+
+Then, on the server, follow `deploy/README.md` for the settings file, the certificate, the systemd unit, nginx, and the firewall.
+
+Enable the unit, but do **not** start it yet:
+
+```bash
+sudo systemctl enable ytdlp-web
+```
+
+The code is not there until the first deploy. The deploy restarts the unit, and a restart starts a unit that is not running.
 
 ## Set up GitHub
 
@@ -114,7 +147,7 @@ Settings, Secrets and variables, Actions, Secrets.
 
 ### Variables
 
-Settings, Secrets and variables, Actions, Variables. Each one has a default, so add a variable only to change it.
+Each one has a default, so add a variable only to change it.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -125,21 +158,26 @@ Settings, Secrets and variables, Actions, Variables. Each one has a default, so 
 
 ## First run
 
-1. Push to `main`, or open Actions and run `tests` by hand.
-2. When `tests` is green, `deploy` starts.
-3. Open the run and read the last lines. It prints the commit that is now running.
+Run `deploy` by hand from the Actions tab, or:
+
+```bash
+gh workflow run deploy
+gh run watch
+```
+
+The first run makes the virtual environment, so it takes longer than the ones after it.
 
 ## When it fails
 
-| Symptom | Cause |
+| Message | Cause |
 |---|---|
-| `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` is wrong, or the server key changed |
-| `Permission denied (publickey)` | the public half is not in `/home/deploy/.ssh/authorized_keys`, or the file permissions are wrong |
+| `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` is wrong, or the host in it does not match `DEPLOY_HOST` as text |
+| `Permission denied (publickey)` | the public half is not in `/home/deploy/.ssh/authorized_keys`, or the permissions are wrong |
 | `sudo: a password is required` | the sudoers file is missing, or the path to `systemctl` does not match |
-| `is-active` fails | the service did not start. Read `journalctl -u ytdlp-web -n 50` on the server |
-| The final check returns 502 | the service is down, or nginx points at the wrong port |
-| The final check returns 303 | this is the login page redirect. Check that `PUBLIC_URL` has no path after the domain |
+| `did not come back within 30s` | the service failed to start. Read `journalctl -u ytdlp-web -n 50` |
+| The final check reports `502` | the service is down, or nginx points at the wrong port |
+| The final check reports `000` | the domain did not answer at all. Check DNS and the firewall |
 
 ## The application password
 
-`YTDLP_WEB_PASSWORD` lives in `/etc/ytdlp-web.env` on the server, mode 600, owned by root. It is never in the repository and never in a GitHub secret for this workflow. A deploy does not change it.
+`YTDLP_WEB_PASSWORD` lives in `/etc/ytdlp-web.env` on the server, mode 600, owned by root. It is never in the repository and never in a GitHub secret. A deploy does not change it.

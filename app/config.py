@@ -103,12 +103,21 @@ def is_loopback_host(name: str) -> bool:
 def block_private_addresses() -> bool:
     """Return True when the outbound address guard must be active.
 
-    On a loopback binding only this machine can reach the server, and
-    fetching from a device on the local network is a fair thing to do.
-    On any other binding the server is reachable by others, and a URL that
-    points inside the network becomes a way to read what they cannot.
+    Two conditions turn it on, and either one is enough.
+
+    The binding is not loopback, so other machines reach the server
+    directly. Or a password is set, which means the operator expects
+    people other than themselves to use it.
+
+    The second condition is the important one. A server behind a reverse
+    proxy binds to loopback and is still reachable from the internet, so
+    the binding on its own cannot decide this.
+
+    With no password and a loopback binding, only this machine can reach
+    the server, and fetching from a device on the local network is a fair
+    thing to do. The guard then stays off.
     """
-    return not is_loopback_host(host())
+    return require_login() or not is_loopback_host(host())
 
 
 def check_startup() -> None:

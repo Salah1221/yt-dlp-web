@@ -64,10 +64,27 @@ def test_loopback_hosts_are_recognised():
         assert config.is_loopback_host(bad) is False
 
 
-def test_private_addresses_are_blocked_only_when_the_host_is_public(monkeypatch):
+def test_the_guard_is_off_only_for_a_private_machine(monkeypatch):
+    monkeypatch.delenv("YTDLP_WEB_PASSWORD", raising=False)
     monkeypatch.setenv("YTDLP_WEB_HOST", "127.0.0.1")
     assert config.block_private_addresses() is False
+
+
+def test_the_guard_is_on_for_a_public_binding(monkeypatch):
+    monkeypatch.delenv("YTDLP_WEB_PASSWORD", raising=False)
     monkeypatch.setenv("YTDLP_WEB_HOST", "0.0.0.0")
+    assert config.block_private_addresses() is True
+
+
+def test_the_guard_is_on_behind_a_reverse_proxy(monkeypatch):
+    """The proxy case: a loopback binding that the internet still reaches.
+
+    The server binds to 127.0.0.1 because nginx sits in front of it. The
+    binding therefore looks local, but anybody can send it a URL. The
+    password is what says this server is not private.
+    """
+    monkeypatch.setenv("YTDLP_WEB_HOST", "127.0.0.1")
+    monkeypatch.setenv("YTDLP_WEB_PASSWORD", "a-long-enough-password")
     assert config.block_private_addresses() is True
 
 

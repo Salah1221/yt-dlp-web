@@ -245,6 +245,10 @@ The cookie check covers every path except the login page, the login route, the l
 
 ### 12.2 The outbound address guard
 
+`config.block_private_addresses()` decides whether the guard runs. It returns True when the password is set, or when the binding is not loopback. Either condition is enough.
+
+The first condition is the one that matters. An earlier version used the binding alone. That was wrong, because a server behind a reverse proxy binds to `127.0.0.1` and the internet still reaches it through the proxy. The binding looked local, so the guard would have stayed off on the one deployment that needs it.
+
 Two layers, because one is not enough.
 
 Layer one runs before the request. It rejects a scheme that is not `http` or `https`, resolves the host, and rejects the URL if **any** resolved address is loopback, private, link-local, reserved, multicast, or unspecified. Checking only the first address is not enough, because a name can resolve to a public and a private address together.

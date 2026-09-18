@@ -56,10 +56,12 @@ serves it on the loopback address.
 
 | | Local mode | Public mode |
 |---|---|---|
-| Host | `127.0.0.1` | any other address, behind a proxy |
-| Password | none | `YTDLP_WEB_PASSWORD` is required |
+| Host | `127.0.0.1` | `127.0.0.1` behind a proxy, or any other address |
+| Password | none | `YTDLP_WEB_PASSWORD` is set |
 | Outbound address guard | off | on |
 | Who can reach it | this machine only | anyone with the password |
+
+The mode is decided by two things, and either one turns public mode on: the password is set, or the binding is not loopback. The password is the one that matters behind a proxy. A proxied server binds to `127.0.0.1` and the internet still reaches it, so the binding on its own cannot decide this.
 
 The application refuses to start in the one unsafe combination: a host that is not loopback with no password set. It prints the reason and exits.
 

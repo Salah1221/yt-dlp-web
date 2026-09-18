@@ -1,0 +1,104 @@
+"""The FastAPI application for the local yt-dlp web page."""
+
+from __future__ import annotations
+
+import asyncio
+import shutil
+import urllib.parse
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from . import config, downloader, jobs
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+class ProbeRequest(BaseModel):
+    url: str
+
+
+class JobRequest(BaseModel):
+    url: str
+    mode: str
+    format_id: str | None = None
+
+
+def content_disposition(filename: str) -> str:
+    """Build a header that holds an ASCII name and a UTF-8 name.
+
+    RFC 5987 defines the second form. A title can hold a character that
+    is not ASCII, and an old browser reads the first form only.
+    """
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    ascii_name = ascii_name.replace('"', "_").replace("\\", "_")
+    quoted = urllib.parse.quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
+
+
+def create_app(store: jobs.JobStore | None = None) -> FastAPI:
+    root = config.temp_root()
+    root.mkdir(parents=True, exist_ok=True)
+    job_store = store or jobs.JobStore(root, config.JOB_TTL_SECONDS)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError(
+                "ffmpeg is not on PATH. Install ffmpeg, then start the server again.")
+        job_store.attach_loop(asyncio.get_running_loop())
+        yield
+
+    app = FastAPI(title="yt-dlp web", lifespan=lifespan)
+    app.state.store = job_store
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.post("/api/probe")
+    async def probe(request: ProbeRequest) -> dict:
+        try:
+            return await asyncio.to_thread(downloader.probe, request.url)
+        except Exception as error:
+            raise HTTPException(status_code=400, detail=str(error))
+
+    @app.post("/api/jobs")
+    async def start_job(request: JobRequest) -> dict:
+        if request.mode not in downloader.MODES:
+            raise HTTPException(status_code=400,
+                                detail="mode must be video, audio, or format")
+        if request.mode == "format" and not request.format_id:
+            raise HTTPException(status_code=400,
+                                detail="mode 'format' needs a format_id")
+        job = job_store.create(request.url, request.mode, request.format_id)
+        asyncio.create_task(asyncio.to_thread(downloader.run, job, job_store))
+        return {"job_id": job.id}
+
+    @app.get("/api/jobs/{job_id}")
+    def job_state(job_id: str) -> dict:
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="no such job")
+        return job.public()
+
+    @app.delete("/api/jobs/{job_id}")
+    def cancel_job(job_id: str) -> dict:
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="no such job")
+        job_store.update(job_id, cancelled=True)
+        if job.state in jobs.TERMINAL_STATES:
+            jobs.delete_workdir(job)
+            job_store.remove(job_id)
+        return {"cancelled": True}
+
+    return app
+
+
+app = create_app()

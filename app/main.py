@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from . import config, downloader, jobs
+from . import cleanup, config, downloader, jobs
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -52,7 +52,17 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
             raise RuntimeError(
                 "ffmpeg is not on PATH. Install ffmpeg, then start the server again.")
         job_store.attach_loop(asyncio.get_running_loop())
-        yield
+        task = asyncio.create_task(cleanup.janitor(
+            job_store, root, config.JOB_TTL_SECONDS,
+            config.CLEANUP_INTERVAL_SECONDS))
+        try:
+            yield
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     app = FastAPI(title="yt-dlp web", lifespan=lifespan)
     app.state.store = job_store

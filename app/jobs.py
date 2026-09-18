@@ -99,6 +99,10 @@ class JobStore:
             return [job.id for job in self._jobs.values()
                     if moment - job.created_at > self._ttl]
 
+    def known_ids(self) -> set[str]:
+        with self._lock:
+            return set(self._jobs)
+
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Record the event loop that serves the WebSocket routes."""
         self._loop = loop

@@ -161,9 +161,13 @@ The order inside `fullchain.pem` matters. Put your own certificate at the top of
 Check that the key belongs to the certificate. The two commands must print the same hash.
 
 ```bash
-openssl x509 -noout -modulus -in /etc/ssl/ytdlp-web/fullchain.pem | openssl md5
-openssl rsa -noout -modulus -in /etc/ssl/ytdlp-web/privkey.pem | openssl md5
+openssl x509 -in /etc/ssl/ytdlp-web/fullchain.pem -noout -pubkey | openssl sha256
+openssl pkey -in /etc/ssl/ytdlp-web/privkey.pem -pubout | openssl sha256
 ```
+
+`openssl pkey` reads an RSA key and an elliptic curve key. The older `openssl rsa` form fails on an elliptic curve key, and Let's Encrypt issues those by default.
+
+Your provider may also give a public key file. Do not install it. nginx never reads one, because the public key is already inside the certificate.
 
 ## 7b. Let's Encrypt, with automatic renewal
 

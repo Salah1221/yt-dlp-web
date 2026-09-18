@@ -29,7 +29,7 @@ The deploy checks out the exact commit that the tests ran against, not the head 
 8. Requests `/login` on your domain until it answers 200, up to 10 times.
 9. Deletes the key from the runner.
 
-**Warning:** step 4 uses `--delete`. Any file you add inside the deploy path by hand is removed on the next deploy. The excluded folders are safe, and so is everything outside that path, such as `/etc/ytdlp-web.env`, the certificate, and the nginx site file.
+**Warning:** step 4 uses `--delete`. Any file you add inside the deploy path by hand is removed on the next deploy. The excluded folders are safe, and so is everything outside that path, such as `/etc/yt-dlp-web/ytdlp-web.env`, the certificate, and the nginx site file.
 
 ## Set up the server
 
@@ -180,4 +180,4 @@ The first run makes the virtual environment, so it takes longer than the ones af
 
 ## The application password
 
-`YTDLP_WEB_PASSWORD` lives in `/etc/ytdlp-web.env` on the server, mode 600, owned by root. It is never in the repository and never in a GitHub secret. A deploy does not change it.
+`YTDLP_WEB_PASSWORD` lives in `/etc/yt-dlp-web/ytdlp-web.env` on the server, mode 600, owned by root. It is never in the repository and never in a GitHub secret. A deploy does not change it.

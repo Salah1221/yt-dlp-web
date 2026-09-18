@@ -13,7 +13,7 @@ WorkingDirectory=/opt/ytdlp-web
 
 # The leading "-" lets the service start if the file is absent.
 # The file must exist in a real deployment, because YTDLP_WEB_PASSWORD is required.
-EnvironmentFile=-/etc/ytdlp-web.env
+EnvironmentFile=-/etc/yt-dlp-web/ytdlp-web.env
 
 ExecStart=/opt/ytdlp-web/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 

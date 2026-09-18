@@ -20,7 +20,7 @@ This guide does not use certbot. It does not use any certificate automation. You
 
 ```bash
 apt update
-apt install -y python3 python3-venv python3-pip ffmpeg nginx
+apt install -y python3 python3-venv python3-pip ffmpeg nginx rsync
 ```
 
 Check the Python version:
@@ -42,31 +42,39 @@ chown -R ytdlp:ytdlp /var/lib/ytdlp-web
 chmod 750 /var/lib/ytdlp-web /var/lib/ytdlp-web/work
 ```
 
-## 3. Copy the application code
+## 3. Put the application code in place
 
-Put the code in `/opt/ytdlp-web`. Use `git clone`, or copy the folder from your workstation with `scp`.
+The GitHub Actions deploy fills this folder with rsync, so there is nothing to clone here and the server needs no GitHub credential.
+
+Make the folder and give it to the deploy user:
 
 ```bash
+adduser --disabled-password --gecos "" deploy
 mkdir -p /opt/ytdlp-web
-# PLACEHOLDER: use your own repository URL, or copy the files another way.
-git clone <YOUR-REPOSITORY-URL> /opt/ytdlp-web
+chown -R deploy:deploy /opt/ytdlp-web
+chmod 755 /opt/ytdlp-web
 ```
 
-After the copy, the file `/opt/ytdlp-web/app/main.py` must exist.
+The folder is readable by every user on the machine, and that is correct. The code holds no secret. The password lives in `/etc/yt-dlp-web/ytdlp-web.env`, which only root can read.
 
-Set the owner. The code stays read-only for the service user.
+To deploy by hand instead, send the files from your own checkout:
 
 ```bash
-chown -R root:ytdlp /opt/ytdlp-web
-chmod -R o-rwx /opt/ytdlp-web
+rsync -az --delete --exclude '.git/' --exclude '.venv/'       ./ deploy@your.server.address:/opt/ytdlp-web/
 ```
+
+After either route, the file `/opt/ytdlp-web/app/main.py` must exist.
 
 ## 4. Create the virtual environment
 
+Skip this section if you use GitHub Actions. The first deploy makes the virtual environment by itself, which is why the first run takes longer than the ones after it.
+
+To make it by hand:
+
 ```bash
-python3 -m venv /opt/ytdlp-web/.venv
-/opt/ytdlp-web/.venv/bin/pip install --upgrade pip
-/opt/ytdlp-web/.venv/bin/pip install -r /opt/ytdlp-web/requirements.txt
+sudo -u deploy python3 -m venv /opt/ytdlp-web/.venv
+sudo -u deploy /opt/ytdlp-web/.venv/bin/pip install --upgrade pip
+sudo -u deploy /opt/ytdlp-web/.venv/bin/pip install -r /opt/ytdlp-web/requirements.txt
 ```
 
 Check that uvicorn is present:
@@ -77,10 +85,18 @@ Check that uvicorn is present:
 
 ## 5. Write the environment file
 
-Copy the template and protect it. The file holds the password, so only root may read it.
+The file holds the password, so it lives in its own directory and only root may read it.
 
 ```bash
-install -o root -g root -m 600 /opt/ytdlp-web/deploy/ytdlp-web.env.example /etc/ytdlp-web.env
+mkdir -p /etc/yt-dlp-web
+chown root:root /etc/yt-dlp-web
+chmod 755 /etc/yt-dlp-web
+```
+
+Copy the template. Take it from `/opt/ytdlp-web/deploy/` when the code is already there, or from wherever you copied it if this is a first bring-up:
+
+```bash
+install -o root -g root -m 600         /opt/ytdlp-web/deploy/ytdlp-web.env.example         /etc/yt-dlp-web/ytdlp-web.env
 ```
 
 Generate a password:
@@ -89,12 +105,12 @@ Generate a password:
 openssl rand -base64 24
 ```
 
-Open `/etc/ytdlp-web.env` and paste the output into the `YTDLP_WEB_PASSWORD` line. Keep the other values as they are.
+Open `/etc/yt-dlp-web/ytdlp-web.env` and paste the output into the `YTDLP_WEB_PASSWORD` line. Keep the other values as they are. In particular keep `YTDLP_WEB_HOST=127.0.0.1`, because nginx sits in front of the application.
 
 Confirm the mode:
 
 ```bash
-ls -l /etc/ytdlp-web.env
+ls -l /etc/yt-dlp-web/ytdlp-web.env
 ```
 
 The output must show `-rw------- 1 root root`.
@@ -217,7 +233,7 @@ Do these checks in order.
 | A long pause before a download starts | `proxy_buffering` is on, so nginx stores the whole file first | set `proxy_buffering off;` in the `location /api/` block |
 | The browser shows 502 Bad Gateway | the service is not running | run `systemctl status ytdlp-web` and `journalctl -u ytdlp-web -n 50` |
 | A phone shows a certificate warning, a desktop does not | the intermediate certificates are missing from the chain file | put the leaf first and the intermediates under it in `fullchain.pem`, then reload nginx |
-| The login always fails | `YTDLP_WEB_PASSWORD` is not set, or the service still runs with the old value | check `/etc/ytdlp-web.env`, then run `systemctl restart ytdlp-web` |
+| The login always fails | `YTDLP_WEB_PASSWORD` is not set, or the service still runs with the old value | check `/etc/yt-dlp-web/ytdlp-web.env`, then run `systemctl restart ytdlp-web` |
 | A job fails with a write error | the `ytdlp` user cannot write in the work directory | run `chown -R ytdlp:ytdlp /var/lib/ytdlp-web` |
 | A login attempt returns 429 | the nginx rate limit stopped it (5 per minute per address) | wait one minute, or raise the rate in the `limit_req_zone` line |
 

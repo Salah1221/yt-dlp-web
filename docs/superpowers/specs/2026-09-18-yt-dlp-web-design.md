@@ -177,7 +177,9 @@ sequenceDiagram
 | the WebSocket drops | no action, the job continues | the page polls every 2 seconds |
 | the person presses Cancel | set the cancel flag, the hook stops the run | the job goes, and the folder is deleted |
 | the disk is full | catch `OSError`, set state `error` | the error text |
-| the person clicks Download two times | the file is already deleted | HTTP 410 Gone |
+| the person clicks Download two times | the first send deleted the folder and the record | HTTP 404 |
+| the record says `ready`, but the file is absent | the file check fails | HTTP 410 Gone |
+| the job is not yet `ready` | the state check fails | HTTP 409 |
 | an unknown job id | no record in the store | HTTP 404 |
 
 ## 9. Limits of this design

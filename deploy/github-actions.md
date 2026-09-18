@@ -68,11 +68,13 @@ Then write the rule. Change the path if the command above printed a different on
 
 ```bash
 sudo tee /etc/sudoers.d/ytdlp-deploy >/dev/null <<'EOF'
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart ytdlp-web, /usr/bin/systemctl is-active ytdlp-web
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart ytdlp-web
 EOF
 sudo chmod 440 /etc/sudoers.d/ytdlp-deploy
 sudo visudo -c
 ```
+
+`sudo` matches the whole command line, every flag included. A rule for `systemctl is-active ytdlp-web` does not permit `systemctl is-active --quiet ytdlp-web`, because the flag makes it a different command. The deploy therefore runs `is-active` without `sudo`. Reading the state of a unit needs no privilege, so `restart` is the only command in this rule.
 
 This user can restart that one service. It cannot become root, and it cannot touch any other service.
 

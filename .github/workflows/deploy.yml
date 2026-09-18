@@ -139,7 +139,10 @@ jobs:
           # Wait for the unit to report that it is up. A fixed sleep either
           # wastes time or reports success too early.
           for attempt in $(seq 1 30); do
-            if sudo -n /usr/bin/systemctl is-active --quiet "$service"; then
+            # is-active only reads state, so it needs no privilege. Using
+            # sudo here would need its own sudoers rule as well, because
+            # sudoers matches the whole command line, every flag included.
+            if systemctl is-active --quiet "$service"; then
               echo "$service is active after ${attempt}s"
               exit 0
             fi

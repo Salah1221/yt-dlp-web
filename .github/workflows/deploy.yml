@@ -160,7 +160,10 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 10); do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${PUBLIC_URL}/login" || echo "000")
+            # curl already prints 000 when it cannot complete the request,
+            # so a fallback value here would print it a second time.
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${PUBLIC_URL}/login") || true
+            [ -n "$code" ] || code="000"
             if [ "$code" = "200" ]; then
               echo "GET ${PUBLIC_URL}/login returned 200"
               exit 0

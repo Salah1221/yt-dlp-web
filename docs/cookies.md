@@ -186,37 +186,28 @@ client. Press Check again, or use the Video MP4 button.
 
 ### When the token is wanted anyway
 
-Some videos are served to no client without a token. The page says so, and a
-plugin mints the token for yt-dlp: `bgutil-ytdlp-pot-provider`.
+Some videos are served to no client without a token, and a server address
+that YouTube has taken against is refused the four clients above as well,
+cookies or not. The page says which. The answer to both is a small server
+beside this one that mints the token, with the yt-dlp plugin that asks it.
+
+On a server set up from `deploy/README.md`, one command installs it:
 
 ```bash
-/opt/ytdlp-web/.venv/bin/pip install bgutil-ytdlp-pot-provider
+bash /opt/ytdlp-web/deploy/install-pot-provider.sh
 ```
 
-The plugin is the small half. It needs the generator beside it, as either a
-server it talks to over HTTP, or a script it runs itself. The script route
-suits this application, because the runtime it wants is the deno that is
-already installed, and it needs the generator source in the home of the
-service user:
+Section 12 of that guide describes what it does. On your own machine, the
+project is `bgutil-ytdlp-pot-provider`; its README has the steps, and the
+HTTP server route is the one this application looks for, on
+`127.0.0.1:4416`.
 
-```
-~/bgutil-ytdlp-pot-provider/server/src/generate_once.ts
-```
-
-The project's own README has the steps that put it there and install its
-dependencies, and it wants deno 2.4.3 or later.
-
-Then hand the client choice back to yt-dlp, which can use every client once
-the token can be had:
-
-```
-YTDLP_WEB_PLAYER_CLIENT=default
-```
-
-The application does not look for the plugin by itself. A plugin that is
-installed and cannot reach its generator looks exactly like one that works,
-and believing it would put the server back on the clients that serve it
-nothing. Saying `default` is you saying that yours works.
+The application asks the server for itself, once a minute, on the same path
+the plugin uses. With a server answering it leaves the choice of YouTube
+clients to yt-dlp, which can use every one of them again. Without one it
+asks the four that need no token. Nothing has to be set for either, and
+`YTDLP_WEB_POT_SERVER` names a server elsewhere or, as `off`, says there is
+none to ask.
 
 ## Without a cookie file
 

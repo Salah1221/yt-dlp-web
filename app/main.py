@@ -104,6 +104,33 @@ def warn_about_the_js_runtime() -> None:
                  ", ".join(found))
 
 
+def say_which_youtube_clients() -> None:
+    """Say whether a proof token server answers, and what follows from it.
+
+    With one, yt-dlp asks whichever YouTube clients it likes. Without
+    one, this application asks only the clients that need no token,
+    which is what a server can use at all. Either is fine to run with;
+    the line is so that the operator knows which they have.
+    """
+    if config.player_clients():
+        log.info("YouTube clients are set by hand: %s.",
+                 ", ".join(config.player_clients()))
+        return
+    server = config.pot_server()
+    if server is None:
+        log.info("no proof token server is configured; YouTube is asked "
+                 "through the clients that need no token.")
+        return
+    version = downloader.token_server_version()
+    if version:
+        log.info("a proof token server answers at %s (version %s); yt-dlp "
+                 "picks the YouTube clients.", server, version)
+        return
+    log.info("no proof token server answers at %s; YouTube is asked through "
+             "the clients that need no token. deploy/README.md section 12 "
+             "installs one.", server)
+
+
 def create_app(store: jobs.JobStore | None = None) -> FastAPI:
     root = config.temp_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -118,6 +145,7 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
         config.check_js_runtimes()
         downloader.check_player_clients()
         warn_about_the_js_runtime()
+        say_which_youtube_clients()
         # Wrap the socket layer once, so a redirect to a private address
         # is caught at connection time and not only before the request.
         urlguard.install()

@@ -12,6 +12,21 @@ import threading
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def no_token_server_unless_asked(monkeypatch):
+    """Keep a token server that happens to be running off the tests.
+
+    Whether one answers on the default port changes what the downloader
+    asks YouTube for. A test that wants one says so with its own
+    fixture; every other test runs as though there were none.
+    """
+    monkeypatch.setenv("YTDLP_WEB_POT_SERVER", "off")
+    from app import downloader
+
+    monkeypatch.setattr(downloader, "_token_server_seen",
+                        {"at": 0.0, "ready": False, "version": None})
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

@@ -373,6 +373,59 @@ YTDLP_WEB_JS_RUNTIMES=node:/opt/node22/bin/node
 
 The other is the client that yt-dlp asks for, and the application already handles it: YouTube wants a proof token from its favourite clients and gives it to browsers only, so the application asks for the clients that want none. Nothing to set. `YTDLP_WEB_PLAYER_CLIENT` overrides that list, and `default` hands the choice back to yt-dlp, which is what a server with a token plugin wants. `docs/cookies.md` describes all of it.
 
+## 12. The proof token server
+
+Skip this section until the page says YouTube wants a token, or until the
+robot check keeps coming back with cookies that are genuinely fresh.
+
+YouTube hands a proof token to a browser and holds its streams from a server
+without one. Without the token the application can only ask the four YouTube
+clients that need none, and YouTube can refuse those to a server address it
+does not like. A small server beside this one mints the token, and yt-dlp asks
+it through a plugin. With it, every client is open again.
+
+Section 11 must be done first: the token server runs on deno.
+
+One command installs the lot, as root:
+
+```bash
+bash /opt/ytdlp-web/deploy/install-pot-provider.sh
+```
+
+It fetches the server source at the version the plugin wants, installs its
+dependencies as the `ytdlp` user, puts the plugin into the application's
+virtual environment, installs `ytdlp-pot.service`, starts it, waits for it to
+answer, and restarts `ytdlp-web`. Run it again at any time; it is safe to
+repeat.
+
+The server binds to `127.0.0.1:4416` and `::1` only. Nothing on the network
+reaches it, and nginx has nothing to do with it.
+
+Check that the application noticed:
+
+```bash
+journalctl -u ytdlp-web -n 20 | grep -i "proof token"
+```
+
+The line says either that a server answers and yt-dlp picks the clients, or
+that none answers and the four clients that need no token are asked. The
+application checks the server for itself once a minute, on the same path the
+plugin uses, so a server that goes down is noticed without a restart and one
+that comes back is noticed the same way.
+
+The plugin survives a deploy. The deploy keeps the virtual environment and
+installs the requirements over it, so what the script put there stays.
+
+To turn it off, stop the service and tell the application there is none:
+
+```bash
+systemctl disable --now ytdlp-pot
+```
+
+```
+YTDLP_WEB_POT_SERVER=off
+```
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -390,7 +443,9 @@ The other is the client that yt-dlp asks for, and the application already handle
 | The log warns about a JavaScript runtime | no runtime is installed, or the node that is installed is older than 22 | install deno as section 11 shows, then `systemctl restart ytdlp-web` |
 | A download fails with "The page needs to be reloaded" | YouTube stopped serving one of the clients that yt-dlp asks for a signed in visitor, or the server has no JavaScript runtime | try again in a minute; if it stays, install a runtime as the row above says |
 | A download fails with "Requested format is not available" | no JavaScript runtime, so every stream carrying a signature was dropped | install deno as section 11 shows |
-| It still fails once deno is in place | YouTube wants a proof token for this video from every client that can serve it | the page says so; `docs/cookies.md` installs the plugin that mints it |
+| It still fails once deno is in place | YouTube wants a proof token for this video from every client that can serve it | run `deploy/install-pot-provider.sh`, section 12 |
+| Fresh cookies are refused straight away | YouTube is refusing the server's address, not the account | the token server in section 12 is what answers that |
+| `journalctl -u ytdlp-pot` says the server could not listen on `[::1]` | the machine has no IPv6 loopback | nothing; the server carries on with `127.0.0.1`, which is the one that is used |
 
 ## Keeping it working
 

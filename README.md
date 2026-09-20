@@ -81,6 +81,7 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
 | `YTDLP_WEB_PLAYER_CLIENT` | the clients that need no proof token | the YouTube clients to ask, in order. `default` hands the choice back to yt-dlp |
 | `YTDLP_WEB_JS_RUNTIMES` | deno, or a supported runtime that is installed | the JavaScript runtimes yt-dlp may use, such as `node` |
+| `YTDLP_WEB_POT_SERVER` | `http://127.0.0.1:4416` | the proof token server to ask, or `off` |
 
 ### "Sign in to confirm you're not a bot"
 
@@ -117,8 +118,13 @@ of yt-dlp rather than naming them here. One of them takes cookies, so a
 signed in download still works. This needs nothing installed.
 
 The other cause is a missing JavaScript runtime, which drops streams the same
-way. See `YTDLP_WEB_JS_RUNTIMES` below. The page names which it was, and
-`docs/cookies.md` covers the video that no client will serve without a token.
+way. See `YTDLP_WEB_JS_RUNTIMES` below. The page names which it was.
+
+A video that no client serves without the token, and a server address that
+YouTube refuses even the four clients to, are answered by a small server
+beside this one that mints the token. `deploy/install-pot-provider.sh`
+installs it; the application notices it by itself and lets yt-dlp use every
+client again.
 
 ### "The page needs to be reloaded"
 

@@ -1,0 +1,47 @@
+[Unit]
+Description=ytdlp-pot (proof token server for YouTube, beside ytdlp-web)
+Documentation=file:///opt/ytdlp-web/deploy/README.md
+# Start after the network has a routable address, not only after the stack loads.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ytdlp
+Group=ytdlp
+WorkingDirectory=/opt/bgutil-ytdlp-pot-provider/server
+
+# deno keeps its own cache here. The unit makes nothing else writable.
+Environment=DENO_DIR=/var/lib/ytdlp-web/deno
+Environment=DENO_NO_PROMPT=1
+Environment=DENO_NO_UPDATE_CHECK=1
+
+# The server binds to 127.0.0.1 and ::1 only, and ytdlp-web is its only client.
+ExecStart=/usr/local/bin/deno run --allow-env --allow-net --allow-ffi=. --allow-read=. src/main.ts
+
+Restart=always
+RestartSec=3
+
+# Stop the process group, and kill it if it does not exit in 20 seconds.
+KillMode=mixed
+TimeoutStopSec=20
+
+# --- Hardening, the same as ytdlp-web ---
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The only writable path: the deno cache.
+ReadWritePaths=/var/lib/ytdlp-web/deno
+
+# The server holds a browser environment in memory to mint tokens.
+MemoryMax=768M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

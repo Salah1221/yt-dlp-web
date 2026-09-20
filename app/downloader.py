@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import functools
+import json
 import os
 import shutil
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -126,8 +130,15 @@ def site_opts() -> Iterator[dict]:
         opts["js_runtimes"] = runtimes
     # The operator's choice, or the clients that a server can use at all.
     clients = config.player_clients() or list(default_clients())
+    extractor_args: dict = {}
     if clients:
-        opts["extractor_args"] = {"youtube": {"player_client": list(clients)}}
+        extractor_args["youtube"] = {"player_client": list(clients)}
+    # The plugin looks at one address by itself. Any other has to be said.
+    server = config.pot_server()
+    if server and server != config.POT_SERVER:
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [server]}
+    if extractor_args:
+        opts["extractor_args"] = extractor_args
     browser = config.cookies_from_browser()
     if browser:
         opts["cookiesfrombrowser"] = browser
@@ -274,16 +285,54 @@ def token_free_clients() -> tuple[str, ...]:
     return tuple(name for _, name in sorted(free, key=lambda pair: -pair[0]))
 
 
+# The token server is asked at most this often, in seconds. A download
+# that finds it down does not knock again for every job in the queue.
+TOKEN_SERVER_RECHECK = 60.0
+
+_token_server_seen: dict = {"at": 0.0, "ready": False, "version": None}
+
+
+def token_server_ready() -> bool:
+    """Return True when a server that mints the proof token answers.
+
+    This asks the server itself, on the same path the yt-dlp plugin
+    uses. A plugin that is installed says nothing about whether its
+    server is up, and trusting the one for the other would put this
+    server back on the clients YouTube serves nothing to.
+    """
+    url = config.pot_server()
+    if url is None:
+        return False
+    now = time.monotonic()
+    if now - _token_server_seen["at"] < TOKEN_SERVER_RECHECK:
+        return _token_server_seen["ready"]
+    ready, version = False, None
+    try:
+        with urllib.request.urlopen(f"{url}/ping", timeout=3) as answer:
+            body = json.loads(answer.read().decode("utf-8"))
+        version = body.get("version")
+        ready = bool(version)
+    except (OSError, ValueError, urllib.error.URLError):
+        ready = False
+    _token_server_seen.update(at=now, ready=ready, version=version)
+    return ready
+
+
+def token_server_version() -> str | None:
+    """Return the version the token server reported, if it answered."""
+    token_server_ready()
+    return _token_server_seen["version"]
+
+
 def default_clients() -> tuple[str, ...]:
     """Return the clients to ask when the operator named none.
 
-    Only the ones that need no token. A plugin can mint the token and
-    open the rest, but whether a plugin that is installed can actually
-    reach its server is not a thing this can ask cheaply, and guessing
-    it wrong puts the server back on clients that serve it nothing. An
-    operator who has one working says so with YTDLP_WEB_PLAYER_CLIENT,
-    where `default` hands the choice back to yt-dlp.
+    With a token server answering, every client is open again and
+    yt-dlp knows better than this file which to ask. Without one, only
+    the clients that need no token can serve this server anything.
     """
+    if token_server_ready():
+        return ()
     return token_free_clients()
 
 

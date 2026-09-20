@@ -84,26 +84,24 @@ def client_key(request: Request) -> str:
 
 
 def warn_about_the_js_runtime() -> None:
-    """Say so when YouTube will be served without a JavaScript runtime.
+    """Say what runs the JavaScript that YouTube needs, or that nothing does.
 
-    yt-dlp answers the signature challenge of YouTube in JavaScript. With
-    no runtime it falls back to the one client that needs none, which
-    drops formats and meets the robot check more often. It only warns,
-    because every other site keeps working.
+    yt-dlp answers the signature challenge of YouTube in JavaScript, and
+    it looks for deno alone. Without a runtime it throws away every
+    format that carries a signature, and the download then finds none.
+    It only warns, because every other site keeps working.
     """
-    if config.js_runtimes() or shutil.which("deno"):
-        return
-    found = config.js_runtime_on_path()
-    if found:
+    trouble = downloader.js_runtime_trouble()
+    if trouble:
         log.warning(
-            "no deno on PATH, so yt-dlp runs YouTube without a JavaScript "
-            "runtime. %s is on PATH. Set %s=%s to use it.",
-            found, config.JS_RUNTIME_ENV, found)
+            "%s, so YouTube will serve this server almost nothing. Install "
+            "deno, or install a version of node that yt-dlp supports and set "
+            "%s=node.", trouble, config.JS_RUNTIME_ENV)
         return
-    log.warning(
-        "no JavaScript runtime on PATH, so yt-dlp serves YouTube with fewer "
-        "formats and meets the robot check more often. Install deno, or set "
-        "%s to a runtime that is installed.", config.JS_RUNTIME_ENV)
+    found = downloader.js_runtime_auto()
+    if found and not config.js_runtimes():
+        log.info("no deno on PATH, so yt-dlp runs YouTube with %s.",
+                 ", ".join(found))
 
 
 def create_app(store: jobs.JobStore | None = None) -> FastAPI:

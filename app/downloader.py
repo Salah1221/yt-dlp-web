@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import tempfile
@@ -27,6 +28,11 @@ BOT_CHECK_MARKS = ("sign in to confirm", "not a bot")
 # in with it, because yt-dlp asks a different set of clients as soon as
 # cookies are in play.
 RELOAD_MARKS = ("page needs to be reloaded",)
+
+# And this when nothing it served can be downloaded. A signature that
+# nothing could read takes the format out of the list, so the list runs
+# out and this is what the chooser says at the end of it.
+FORMAT_MARKS = ("requested format is not available",)
 
 # The client in that set which YouTube is refusing. Dropping it leaves the
 # rest of the signed in set, which is what the yt-dlp issue recommends.
@@ -112,7 +118,10 @@ def site_opts() -> Iterator[dict]:
     copy goes back into the store that the page owns.
     """
     opts: dict = {}
-    runtimes = config.js_runtimes()
+    # What the operator asked for, or the runtime that is installed when
+    # they asked for nothing. Without one, YouTube throws away every
+    # format that carries a signature and the download finds none.
+    runtimes = config.js_runtimes() or js_runtime_auto()
     if runtimes:
         opts["js_runtimes"] = runtimes
     clients = config.player_clients()
@@ -143,6 +152,91 @@ def site_opts() -> Iterator[dict]:
         if source == config.cookie_store():
             cookiestore.refresh(copy, stamp)
         copy.unlink(missing_ok=True)
+
+
+@functools.cache
+def runtime_info(name: str, path: str | None = None):
+    """Ask yt-dlp about one JavaScript runtime, or None when it cannot.
+
+    The answer says where the runtime is, which version it is, and
+    whether yt-dlp supports that version. node is the one that catches
+    people: yt-dlp wants 22 or later, and a server carrying 20 has a
+    node that counts for nothing.
+
+    Finding out runs the binary, so the answer is kept. A runtime that
+    is installed while the server runs is picked up at the restart.
+    """
+    try:
+        from yt_dlp.globals import supported_js_runtimes
+
+        runtime = supported_js_runtimes.value.get(name)
+        return runtime(path=path).info if runtime else None
+    except Exception:  # pragma: no cover - only on a changed yt-dlp
+        return None
+
+
+def _supported(name: str, path: str | None = None) -> bool:
+    info = runtime_info(name, path)
+    return bool(info and info.supported)
+
+
+def js_runtime_auto() -> dict[str, dict] | None:
+    """Return the runtime to enable when the operator named none.
+
+    yt-dlp enables deno and nothing else, so a server that carries node
+    and no deno would run YouTube with no runtime at all, and YouTube
+    then serves it almost nothing. Naming the runtime that is there
+    fixes that, and it changes nothing where deno is installed.
+    """
+    for name in config.JS_RUNTIMES:
+        if _supported(name):
+            # yt-dlp reaches deno by itself, so there is nothing to say.
+            return None if name == "deno" else {name: {}}
+    return None
+
+
+def js_runtime_ready() -> bool:
+    """Return True when a runtime that yt-dlp supports will be used."""
+    asked = config.js_runtimes()
+    if asked is None:
+        return any(_supported(name) for name in config.JS_RUNTIMES)
+    return any(_supported(name, spec.get("path") or None)
+               for name, spec in asked.items())
+
+
+def _minimum(name: str) -> str | None:
+    """Return the oldest version of a runtime that yt-dlp supports."""
+    try:
+        from yt_dlp.globals import supported_js_runtimes
+
+        runtime = supported_js_runtimes.value.get(name)
+        version = getattr(runtime, "MIN_SUPPORTED_VERSION", None)
+        return ".".join(str(part) for part in version) if version else None
+    except Exception:  # pragma: no cover - only on a changed yt-dlp
+        return None
+
+
+def js_runtime_trouble() -> str | None:
+    """Return what is wrong with the runtime, in one line, or None.
+
+    A runtime that is installed but too old is the trap. It looks right
+    on the server and counts for nothing, so the line names the version
+    that is there and the version that is wanted.
+    """
+    if js_runtime_ready():
+        return None
+    asked = config.js_runtimes()
+    for name in (asked or config.JS_RUNTIMES):
+        path = (asked or {}).get(name, {}).get("path") or None
+        info = runtime_info(name, path)
+        if not info:
+            continue
+        minimum = _minimum(name)
+        if minimum:
+            return (f"{name} {info.version} is installed, and yt-dlp needs "
+                    f"{minimum} or later")
+        return f"yt-dlp does not support the {name} that is installed"
+    return "no JavaScript runtime is installed"
 
 
 def known_player_clients() -> tuple[str, ...]:
@@ -199,21 +293,43 @@ def retry_opts(error: Exception) -> dict | None:
         "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
 
 
-def explain(error: Exception) -> str:
+def runtime_advice() -> str:
+    """Return the sentence that sends a person to a working runtime."""
+    return (f"{js_runtime_trouble()}. YouTube needs one to read the streams "
+            "it serves. Install deno, or install a version of node that "
+            f"yt-dlp supports and set {config.JS_RUNTIME_ENV}=node.")
+
+
+def explain(error: Exception, mode: str | None = None) -> str:
     """Return the message for the page, in place of the yt-dlp one.
 
-    The robot check is the one failure that a person can act on, and the
-    yt-dlp text tells them to pass a command line option that this
-    application has no command line for.
+    A person can act on these failures, and the yt-dlp text tells them
+    to pass a command line option that this application has no command
+    line for.
     """
     text = str(error)
     if _matches(error, RELOAD_MARKS):
+        if not js_runtime_ready():
+            return ("YouTube refused every client it was asked, and "
+                    f"{runtime_advice()}")
         return ("YouTube refused the client that yt-dlp asks for a signed in "
                 "visitor, and it refused the rest of them as well. This one "
-                "comes and goes, so try again in a minute. If it stays, the "
-                "server has no JavaScript runtime, which YouTube now needs: "
-                f"install deno, or set {config.JS_RUNTIME_ENV} to a runtime "
-                "that is installed.")
+                "comes and goes, so try again in a minute.")
+    if _matches(error, FORMAT_MARKS):
+        if not js_runtime_ready():
+            return ("YouTube served nothing that this server can download. "
+                    "Without a runtime it throws away every stream that "
+                    "carries a signature, which is most of them. "
+                    f"{runtime_advice()}")
+        if mode == "format":
+            return ("that format is gone. The list came from an earlier "
+                    "look at the page, and YouTube serves a different list "
+                    "to each of the clients it answers. Press Check again "
+                    "and take the format from the new list, or use the "
+                    "Video MP4 button, which takes what is there.")
+        return ("YouTube served nothing that this server can download. It "
+                "does this to a signed in visitor at times, and it passes. "
+                "Try again in a minute.")
     if not _matches(error, BOT_CHECK_MARKS):
         return text
     if config.cookie_file() or config.cookies_from_browser():
@@ -406,7 +522,7 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
         store.remove(job.id)
         return
     except Exception as error:  # yt-dlp raises many types
-        store.update(job.id, state=jobs.ERROR, error=explain(error))
+        store.update(job.id, state=jobs.ERROR, error=explain(error, job.mode))
         send()
         jobs.delete_workdir(job)
         return

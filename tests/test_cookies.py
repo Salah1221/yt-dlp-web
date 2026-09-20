@@ -22,7 +22,10 @@ def cookie_jar(tmp_path, monkeypatch):
 
 def test_no_setting_means_no_cookie_option():
     with downloader.site_opts() as opts:
-        assert opts == {}
+        # A runtime that the server has is enabled whatever the cookies
+        # do, so this asks about the cookie keys alone.
+        assert "cookiefile" not in opts
+        assert "cookiesfrombrowser" not in opts
 
 
 def test_the_cookie_file_reaches_yt_dlp(cookie_jar):

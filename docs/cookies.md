@@ -154,6 +154,26 @@ Naming the clients yourself with `YTDLP_WEB_PLAYER_CLIENT` turns the second
 attempt off, because a named list is a choice and the application does not
 argue with it.
 
+## "Requested format is not available"
+
+```
+ERROR: [youtube] kzWg5jVuHUI: Requested format is not available.
+```
+
+YouTube served the page and nothing on it could be downloaded.
+
+Nearly always this is the JavaScript runtime. A stream whose signature
+nothing can read is dropped from the list, so the list empties and the
+chooser reaches the end of it. The section below installs one, and the page
+says so in place of this message when the server has none.
+
+With a runtime in place, two other things give it. YouTube does this to a
+signed in visitor now and then, and it passes, so try again in a minute. And
+a format taken from the **Choose a format** list can be gone by the time you
+press it, because YouTube serves a different list to each of the clients it
+answers. Press Check again to take a fresh list, or use the Video MP4
+button, which takes what is there.
+
 ## Without a cookie file
 
 Three things change the answer, and none of them always works.
@@ -165,19 +185,38 @@ URL that fails on a server often works on your own machine, and on your own
 machine `YTDLP_WEB_COOKIES_FROM_BROWSER` needs no export at all.
 
 **A JavaScript runtime.** yt-dlp answers the signature challenge of YouTube
-in JavaScript. It enables deno by itself and finds it on PATH. With no
-runtime it falls back to the single client that needs none, which gives
-fewer formats and meets the check more often. Install deno, or name the
-runtime you already have:
+in JavaScript. Without a runtime it throws away every stream that carries a
+signature, which is most of them, and the download ends with *Requested
+format is not available*.
+
+yt-dlp looks for deno and nothing else. This application also takes node,
+quickjs, or bun when one of them is installed and deno is not, so a server
+that already has a supported runtime needs no setting at all. The startup
+log says which one it found.
+
+Install deno where there is none:
+
+```bash
+apt install -y unzip
+curl -fsSL -o /tmp/deno.zip \
+  https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip
+unzip -o /tmp/deno.zip -d /usr/local/bin
+chmod 755 /usr/local/bin/deno
+deno --version
+```
+
+`apt install nodejs` is not the short route it looks like. yt-dlp needs node
+22 or later, and Debian 12 carries 18, which it refuses. The startup log
+names the version that is installed and the version that is wanted, so it
+tells you when this is what happened.
+
+A runtime somewhere else, or one you want to choose yourself:
 
 ```
-YTDLP_WEB_JS_RUNTIMES=node
+YTDLP_WEB_JS_RUNTIMES=node:/opt/node22/bin/node
 ```
 
-On a Debian server `apt install -y nodejs` is the short route. The server
-writes a warning at startup when it finds no runtime, so the log tells you
-whether this applies to you. The list replaces the default, so naming `node`
-turns deno off.
+The list replaces the default, so naming `node` turns deno off.
 
 **Another client.** YouTube serves the same video to a phone, a television,
 and a browser, and it applies the check to each of them differently.

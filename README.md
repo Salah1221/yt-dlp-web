@@ -80,7 +80,7 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_COOKIE_STORE` | beside the work folders | where the Settings panel saves the cookies |
 | `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
 | `YTDLP_WEB_PLAYER_CLIENT` | none | the YouTube clients to ask, in order, such as `tv,web_safari` |
-| `YTDLP_WEB_JS_RUNTIMES` | `deno` | the JavaScript runtimes yt-dlp may use, such as `node` |
+| `YTDLP_WEB_JS_RUNTIMES` | deno, or a supported runtime that is installed | the JavaScript runtimes yt-dlp may use, such as `node` |
 
 ### "Sign in to confirm you're not a bot"
 
@@ -106,6 +106,13 @@ browser profile instead, and no export is needed.
 The cookie file holds a live session of your account. Give it mode 640 and
 keep it out of the code folder.
 
+### "Requested format is not available"
+
+YouTube served the page and nothing on it could be downloaded. Nearly always
+the server has no JavaScript runtime, so every stream that carries a
+signature was dropped and the list ran out. See `YTDLP_WEB_JS_RUNTIMES`
+below. The page says which of these it is.
+
 ### "The page needs to be reloaded"
 
 This arrives once the cookies are in place. yt-dlp asks a different set of
@@ -120,11 +127,13 @@ answers this way. See `YTDLP_WEB_JS_RUNTIMES` below.
 Two settings can help without a cookie, and neither always works:
 
 - `YTDLP_WEB_JS_RUNTIMES`. yt-dlp answers the signature challenge of YouTube
-  in JavaScript, and it looks for deno alone by itself. With no runtime it
-  falls back to the one client that needs none, which gives fewer formats and
-  meets the check more often. Install deno, or name the runtime you have:
-  `YTDLP_WEB_JS_RUNTIMES=node`. The server writes a warning at startup when it
-  finds none. The list replaces the default, so naming `node` turns deno off.
+  in JavaScript, and it looks for deno alone. Without a runtime it throws away
+  every stream that carries a signature, which is most of them. This
+  application takes node, quickjs, or bun when one is installed and deno is
+  not, so a supported runtime already on the machine needs no setting. The
+  startup log says which one it found, or that none is usable. Note that
+  yt-dlp needs node 22 or later, so the node in Debian 12 does not count.
+  `docs/cookies.md` installs deno in four lines.
 - `YTDLP_WEB_PLAYER_CLIENT`. YouTube serves the same video to a phone, a
   television, and a browser, and it applies the check to each differently.
   `YTDLP_WEB_PLAYER_CLIENT=tv,web_safari` asks them in that order. Which

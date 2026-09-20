@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -186,16 +185,6 @@ def js_runtimes() -> dict[str, dict] | None:
             continue
         runtimes[name.strip().lower()] = {"path": path.strip()} if path.strip() else {}
     return runtimes or None
-
-
-def js_runtime_on_path() -> str | None:
-    """Return the first JavaScript runtime found on PATH, or None."""
-    for name in JS_RUNTIMES:
-        # quickjs ships as qjs, and the others carry their own name.
-        for binary in (("qjs", "quickjs") if name == "quickjs" else (name,)):
-            if shutil.which(binary):
-                return name
-    return None
 
 
 def check_js_runtimes() -> None:

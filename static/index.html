@@ -11,8 +11,52 @@
 <main>
   <header>
     <h1>yt-dlp web</h1>
-    <button id="logout" type="button" class="quiet hidden">Log out</button>
+    <div class="header-actions">
+      <button id="settings-toggle" type="button" class="quiet"
+              aria-expanded="false" aria-controls="settings">Settings</button>
+      <button id="logout" type="button" class="quiet hidden">Log out</button>
+    </div>
   </header>
+
+  <section id="settings" class="card hidden">
+    <h2>Cookies for the video site</h2>
+    <p class="note">
+      A site answers with <em>Sign in to confirm you're not a bot</em> when it
+      wants a signed in visitor. Export the cookies of a browser that is
+      signed in, in the Netscape format that an add-on calls
+      <code>cookies.txt</code>, and put them here.
+    </p>
+
+    <p id="cookie-state" class="status">
+      <span id="cookie-dot" class="dot"></span>
+      <span id="cookie-state-text">Reading the settings</span>
+    </p>
+    <p id="cookie-detail" class="note small hidden"></p>
+
+    <div id="cookie-drop" class="drop">
+      <textarea id="cookie-text" rows="3" spellcheck="false"
+                autocomplete="off" autocapitalize="off" autocorrect="off"
+                aria-label="Paste the cookies here"
+                placeholder="Paste the cookies here"></textarea>
+    </div>
+
+    <p id="cookie-ready" class="ready hidden">
+      <span id="cookie-ready-text"></span>
+      <button id="cookie-discard" type="button" class="link">Discard</button>
+    </p>
+
+    <div class="settings-actions">
+      <label for="cookie-file" class="button">Choose file</label>
+      <input id="cookie-file" type="file" accept=".txt,text/plain" class="hidden">
+      <button id="cookie-save" type="button" class="primary" disabled>Save</button>
+      <button id="cookie-clear" type="button" class="quiet">Remove</button>
+    </div>
+
+    <p class="note small">
+      The cookies go to the server and stay there. The box empties as soon as
+      it has them, so nothing on this page can be read back or copied again.
+    </p>
+  </section>
 
   <form id="probe-form">
     <input id="url" type="url" inputmode="url" placeholder="Paste a video URL"

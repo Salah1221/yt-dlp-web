@@ -76,6 +76,53 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_MAX_FILESIZE` | no limit | the largest file, in bytes |
 | `YTDLP_WEB_MAX_JOBS` | 2 | how many downloads run together |
 | `YTDLP_WEB_TTL` | 1800 | seconds before an uncollected file is deleted |
+| `YTDLP_WEB_COOKIES` | none | a `cookies.txt` file to send to the site |
+| `YTDLP_WEB_COOKIE_STORE` | beside the work folders | where the Settings panel saves the cookies |
+| `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
+| `YTDLP_WEB_PLAYER_CLIENT` | none | the YouTube clients to ask, in order, such as `tv,web_safari` |
+| `YTDLP_WEB_JS_RUNTIMES` | `deno` | the JavaScript runtimes yt-dlp may use, such as `node` |
+
+### "Sign in to confirm you're not a bot"
+
+A site answers that way when it wants a signed in visitor. It asks a server
+more often than a home connection, because many people share one server
+address.
+
+Export the cookies of a browser that is signed in, press **Settings** on the
+page, choose the file, and press Save. The next download uses them, and
+nothing restarts. The box empties the moment it has the text, so nothing a
+person can read or copy again stays on the page. The panel shows how many
+cookies it holds and when the first one expires, and it never shows the
+cookies themselves. Remove deletes them.
+
+`YTDLP_WEB_COOKIES` does the same thing from the environment file, for a
+server that must come up with cookies already in place. A file saved in the
+panel wins over that one. `docs/cookies.md` holds the steps for both, and
+the page says what to do when the message arrives.
+
+On your own machine, `YTDLP_WEB_COOKIES_FROM_BROWSER=firefox` reads the
+browser profile instead, and no export is needed.
+
+The cookie file holds a live session of your account. Give it mode 640 and
+keep it out of the code folder.
+
+Two settings can help without a cookie, and neither always works:
+
+- `YTDLP_WEB_JS_RUNTIMES`. yt-dlp answers the signature challenge of YouTube
+  in JavaScript, and it looks for deno alone by itself. With no runtime it
+  falls back to the one client that needs none, which gives fewer formats and
+  meets the check more often. Install deno, or name the runtime you have:
+  `YTDLP_WEB_JS_RUNTIMES=node`. The server writes a warning at startup when it
+  finds none. The list replaces the default, so naming `node` turns deno off.
+- `YTDLP_WEB_PLAYER_CLIENT`. YouTube serves the same video to a phone, a
+  television, and a browser, and it applies the check to each differently.
+  `YTDLP_WEB_PLAYER_CLIENT=tv,web_safari` asks them in that order. Which
+  client answers changes from month to month, so treat it as something to
+  try, not as a fix.
+
+The check follows the address more than anything else. The same URL that
+fails on a rented server often works from a home connection, where this
+application was made to run.
 
 ### The outbound address guard
 

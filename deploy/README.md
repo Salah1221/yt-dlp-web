@@ -297,6 +297,78 @@ Do these checks in order.
 | File download | let a job finish | the file arrives, and the transfer starts at once |
 | Logs | `journalctl -u ytdlp-web -f` | no repeated restart |
 
+## 11. Cookies for the video site
+
+Skip this section until a download fails with this line:
+
+```
+Sign in to confirm you're not a bot
+```
+
+The site wants a signed in visitor. It asks a server address more often than it asks a home connection, because many people share one server address.
+
+The short route needs nothing on the server. Export the cookies of a browser that is signed in, following `docs/cookies.md`, then open the page, press **Settings**, choose the file, and press Save. The next download uses them, no restart, and the session that ends in a few weeks is replaced the same way.
+
+Set where that file lands, in `/etc/yt-dlp-web/ytdlp-web.env`:
+
+```
+YTDLP_WEB_COOKIE_STORE=/var/lib/ytdlp-web/cookies.txt
+```
+
+It has to sit inside `/var/lib/ytdlp-web`, because `ReadWritePaths` in the unit makes that the one path the service may write. The panel says so when it cannot write.
+
+The long route puts the file on the server by hand, for a machine that must come up with cookies already in place. It holds a live session of that account, so root owns it and only the service reads it:
+
+```bash
+install -o root -g ytdlp -m 640 cookies.txt /etc/yt-dlp-web/cookies.txt
+```
+
+Add this line to `/etc/yt-dlp-web/ytdlp-web.env`:
+
+```
+YTDLP_WEB_COOKIES=/etc/yt-dlp-web/cookies.txt
+```
+
+Restart the service:
+
+```bash
+systemctl restart ytdlp-web
+```
+
+The unit needs no change. The application copies the file for each download and never writes the one you placed, so the read-only `/etc` of the hardened unit is fine. The service refuses to start when the variable names a file that is absent or unreadable, and the log says which.
+
+A file saved in the Settings panel wins over this one, and Remove in the panel falls back to it.
+
+A session does not last forever. When the message returns, export the file again and save it in the panel.
+
+### Before you export anything
+
+Two cheaper things change the same answer.
+
+yt-dlp answers the signature challenge of YouTube in JavaScript, and it looks for deno alone. Without a runtime YouTube gives fewer formats and asks for a sign in more often. The service writes a warning at startup when it finds none:
+
+```bash
+journalctl -u ytdlp-web -n 50 | grep -i javascript
+```
+
+Install a runtime and name it, if the warning is there:
+
+```bash
+apt install -y nodejs
+```
+
+```
+YTDLP_WEB_JS_RUNTIMES=node
+```
+
+The other is the client that yt-dlp asks for. YouTube applies the check differently to a television and to a browser:
+
+```
+YTDLP_WEB_PLAYER_CLIENT=tv,web_safari
+```
+
+Which client answers changes from month to month, so a cookie file remains the steady answer. `docs/cookies.md` describes both in full.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -308,6 +380,10 @@ Do these checks in order.
 | The login always fails | `YTDLP_WEB_PASSWORD` is not set, or the service still runs with the old value | check `/etc/yt-dlp-web/ytdlp-web.env`, then run `systemctl restart ytdlp-web` |
 | A job fails with a write error | the `ytdlp` user cannot write in the work directory | run `chown -R ytdlp:ytdlp /var/lib/ytdlp-web` |
 | A login attempt returns 429 | the nginx rate limit stopped it (5 per minute per address) | wait one minute, or raise the rate in the `limit_req_zone` line |
+| A download fails with "Sign in to confirm you're not a bot" | the site wants a signed in visitor, and it asks a server address more often than a home one | give the service a cookie file, as section 11 describes |
+| The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
+| The Settings panel says the server cannot write the file | `YTDLP_WEB_COOKIE_STORE` points outside `/var/lib/ytdlp-web`, which the unit forbids | put it inside that folder, then `systemctl restart ytdlp-web` |
+| The log warns about a JavaScript runtime | deno is not installed, so YouTube gives fewer formats | run `apt install -y nodejs` and set `YTDLP_WEB_JS_RUNTIMES=node` |
 
 ## Keeping it working
 
@@ -319,6 +395,13 @@ systemctl restart ytdlp-web
 ```
 
 Restart the service after every update. The old version stays in memory until the restart.
+
+Compare what is installed against what is released, when a site fails:
+
+```bash
+/opt/ytdlp-web/.venv/bin/yt-dlp --version
+curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
+```
 
 Update the system packages as well, because ffmpeg comes from the distribution.
 

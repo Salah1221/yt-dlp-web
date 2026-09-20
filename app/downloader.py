@@ -272,25 +272,72 @@ def check_player_clients() -> None:
                 f"not know. The names are: {', '.join(sorted(known))}.")
 
 
+class Refused(ValueError):
+    """A failure that already carries the message for the page."""
+
+
+class Notes:
+    """Keeps the few things yt-dlp says that explain an empty page.
+
+    It keeps a line only when the line carries one of the words below,
+    so what it holds is small and says nothing about the video, the
+    account, or the cookies. Only whole words are ever asked of it, and
+    the lines themselves never leave it.
+    """
+
+    # YouTube holds streams back in these ways, and yt-dlp says so in
+    # passing while it drops them.
+    KEYWORDS = ("po token", "gvs", "sabr", "missing a url",
+                "http error 403", "have been skipped")
+
+    LIMIT = 50
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def _keep(self, message) -> None:
+        text = str(message)
+        lowered = text.lower()
+        if len(self.lines) < self.LIMIT and any(word in lowered
+                                                for word in self.KEYWORDS):
+            self.lines.append(text)
+
+    debug = info = warning = error = _keep
+
+    def mentions(self, *words: str) -> bool:
+        return any(word.lower() in line.lower()
+                   for line in self.lines for word in words)
+
+
 def _matches(error: Exception, marks: tuple[str, ...]) -> bool:
     lowered = str(error).lower()
     return all(mark in lowered for mark in marks)
 
 
-def retry_opts(error: Exception) -> dict | None:
-    """Return the options for a second attempt, or None for no second try.
+def retry_opts(error: Exception, opts: dict) -> dict | None:
+    """Return the changes for a second attempt, or None for no second try.
+
+    Two failures are worth asking again about, and each is asked in the
+    way that answers it.
 
     YouTube refuses one of the clients that yt-dlp picks for a signed in
-    visitor, and the refusal comes and goes. Asking the rest of that set
-    costs one request and answers most of them.
+    visitor, and the refusal comes and goes. The rest of that set is
+    asked instead. An operator who named the clients has said what to
+    ask, so their choice stands and nothing is changed.
 
-    An operator who named the clients has said what to ask, so their
-    choice stands and nothing is retried.
+    And YouTube holds the streams of a signed in visitor behind a token
+    that it hands to a browser and not to a server, which leaves nothing
+    to download. Signing in is what moved yt-dlp onto those clients, so
+    the second attempt asks as nobody. A video that needs the sign in
+    fails again, and the message says so.
     """
-    if not _matches(error, RELOAD_MARKS) or config.player_clients():
-        return None
-    return {"extractor_args": {
-        "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+    if _matches(error, RELOAD_MARKS) and not config.player_clients():
+        return {"extractor_args": {
+            "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+    if _matches(error, FORMAT_MARKS) and (opts.get("cookiefile")
+                                          or opts.get("cookiesfrombrowser")):
+        return {"cookiefile": None, "cookiesfrombrowser": None}
+    return None
 
 
 def runtime_advice() -> str:
@@ -300,7 +347,8 @@ def runtime_advice() -> str:
             f"yt-dlp supports and set {config.JS_RUNTIME_ENV}=node.")
 
 
-def explain(error: Exception, mode: str | None = None) -> str:
+def explain(error: Exception, mode: str | None = None,
+            notes: Notes | None = None) -> str:
     """Return the message for the page, in place of the yt-dlp one.
 
     A person can act on these failures, and the yt-dlp text tells them
@@ -321,15 +369,28 @@ def explain(error: Exception, mode: str | None = None) -> str:
                     "Without a runtime it throws away every stream that "
                     "carries a signature, which is most of them. "
                     f"{runtime_advice()}")
+        if notes is not None and notes.mentions("po token"):
+            return ("YouTube is holding this video behind a token that it "
+                    "hands to a browser and not to a server. It asks a "
+                    "signed in visitor for one far more often than anybody "
+                    "else, so the cookies are worth taking out in Settings. "
+                    "A plugin can mint the token instead, and "
+                    "docs/cookies.md names it.")
+        if notes is not None and notes.mentions("sabr"):
+            return ("YouTube is serving this video only through its own "
+                    "streaming protocol, which yt-dlp cannot take. Taking "
+                    "the cookies out in Settings moves this server off the "
+                    "clients that it does this to first.")
         if mode == "format":
             return ("that format is gone. The list came from an earlier "
                     "look at the page, and YouTube serves a different list "
                     "to each of the clients it answers. Press Check again "
                     "and take the format from the new list, or use the "
                     "Video MP4 button, which takes what is there.")
-        return ("YouTube served nothing that this server can download. It "
-                "does this to a signed in visitor at times, and it passes. "
-                "Try again in a minute.")
+        return ("YouTube served nothing that this server can download, "
+                "with the cookies and without them. It does this to some "
+                "videos and some visitors at a time, and it passes, so try "
+                "again in a minute.")
     if not _matches(error, BOT_CHECK_MARKS):
         return text
     if config.cookie_file() or config.cookies_from_browser():
@@ -346,6 +407,52 @@ def _extract(opts: dict, url: str, download: bool) -> dict | None:
     """Run one yt-dlp call. Every call in this module goes through here."""
     with YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=download)
+
+
+def attempt(opts: dict, url: str, download: bool, allow_private: bool,
+            mode: str | None = None) -> dict | None:
+    """Ask yt-dlp once, and once more when the failure has an answer.
+
+    Both attempts run with the yt-dlp warnings turned back on and kept.
+    The reason a page held nothing to download is in them, and the
+    message for the person is worth more for naming which reason it was.
+    The warnings go to the notes and nowhere else, so nothing of them
+    reaches the console.
+    """
+    notes = Notes()
+
+    def ask(extra: dict | None = None):
+        with urlguard.guarded(allow_private=allow_private):
+            return _extract({**opts, "no_warnings": False, "logger": notes,
+                             # The reason a client's formats were dropped is
+                             # a debug line for the clients yt-dlp asks by
+                             # default, so the notes only see it this way.
+                             "verbose": True, **(extra or {})},
+                            url, download)
+
+    try:
+        return ask()
+    except jobs.JobCancelled:
+        raise
+    except Exception as error:  # yt-dlp raises many types
+        retry = retry_opts(error, opts)
+        if retry is None:
+            _refuse(error, mode, notes)
+        try:
+            return ask(retry)
+        except jobs.JobCancelled:
+            raise
+        except Exception as again:
+            _refuse(again, mode, notes)
+
+
+def _refuse(error: Exception, mode: str | None,
+            notes: Notes | None = None) -> None:
+    """Raise the failure with the message for the page, or as it came."""
+    message = explain(error, mode, notes)
+    if message == str(error):
+        raise error
+    raise Refused(message) from error
 
 
 def find_output(workdir: str | Path) -> Path | None:
@@ -434,21 +541,7 @@ def probe(url: str) -> dict:
     with site_opts() as extra:
         opts = {"quiet": True, "no_warnings": True, "skip_download": True,
                 "noplaylist": True, **extra}
-        try:
-            with urlguard.guarded(allow_private=allow_private):
-                info = _extract(opts, url, download=False)
-        except Exception as error:  # yt-dlp raises many types
-            retry = retry_opts(error)
-            if retry is None:
-                message = explain(error)
-                if message == str(error):
-                    raise
-                raise ValueError(message) from error
-            try:
-                with urlguard.guarded(allow_private=allow_private):
-                    info = _extract({**opts, **retry}, url, download=False)
-            except Exception as second:
-                raise ValueError(explain(second)) from second
+        info = attempt(opts, url, False, allow_private)
     if info is None:
         raise ValueError("this URL gives no video")
     if info.get("_type") == "playlist":
@@ -506,20 +599,17 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
     try:
         urlguard.check_url(job.url, allow_private=allow_private)
         with site_opts() as extra:
-            with urlguard.guarded(allow_private=allow_private):
-                try:
-                    info = _extract({**opts, **extra}, job.url, download=True)
-                except jobs.JobCancelled:
-                    raise
-                except Exception as error:  # yt-dlp raises many types
-                    retry = retry_opts(error)
-                    if retry is None:
-                        raise
-                    info = _extract({**opts, **extra, **retry}, job.url,
-                                    download=True)
+            info = attempt({**opts, **extra}, job.url, True, allow_private,
+                           job.mode)
     except jobs.JobCancelled:
         jobs.delete_workdir(job)
         store.remove(job.id)
+        return
+    except Refused as refused:
+        # attempt() has already put this one into words for the page.
+        store.update(job.id, state=jobs.ERROR, error=str(refused))
+        send()
+        jobs.delete_workdir(job)
         return
     except Exception as error:  # yt-dlp raises many types
         store.update(job.id, state=jobs.ERROR, error=explain(error, job.mode))

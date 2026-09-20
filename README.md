@@ -108,10 +108,16 @@ keep it out of the code folder.
 
 ### "Requested format is not available"
 
-YouTube served the page and nothing on it could be downloaded. Nearly always
-the server has no JavaScript runtime, so every stream that carries a
-signature was dropped and the list ran out. See `YTDLP_WEB_JS_RUNTIMES`
-below. The page says which of these it is.
+YouTube served the page and nothing on it could be downloaded. Usually the
+server has no JavaScript runtime, so every stream that carries a signature
+was dropped and the list ran out. See `YTDLP_WEB_JS_RUNTIMES` below.
+
+With a runtime in place it is the token that YouTube gives a browser and not
+a server. It asks a signed in visitor for one far more often, so the
+application asks a second time with the cookies left off, which usually
+passes. When it does not, take the cookies out in Settings.
+
+The page names which of these it was.
 
 ### "The page needs to be reloaded"
 

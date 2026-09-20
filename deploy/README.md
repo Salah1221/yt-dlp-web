@@ -396,6 +396,7 @@ Which client answers changes from month to month, so a cookie file remains the s
 | The log warns about a JavaScript runtime | no runtime is installed, or the node that is installed is older than 22 | install deno as section 11 shows, then `systemctl restart ytdlp-web` |
 | A download fails with "The page needs to be reloaded" | YouTube stopped serving one of the clients that yt-dlp asks for a signed in visitor, or the server has no JavaScript runtime | try again in a minute; if it stays, install a runtime as the row above says |
 | A download fails with "Requested format is not available" | no JavaScript runtime, so every stream carrying a signature was dropped | install deno as section 11 shows |
+| It still fails once deno is in place | YouTube wants a token it gives a browser and not a server, which it asks a signed in visitor for far more often | take the cookies out in the Settings panel and try again |
 
 ## Keeping it working
 

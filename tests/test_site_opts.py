@@ -176,7 +176,7 @@ def test_the_reload_error_asks_the_rest_of_the_clients():
 
     error = DownloadError("ERROR: [youtube] kzWg5jVuHUI: "
                           "The page needs to be reloaded.")
-    assert downloader.retry_opts(error) == {"extractor_args": {
+    assert downloader.retry_opts(error, {}) == {"extractor_args": {
         "youtube": {"player_client": ["default", "-tv_downgraded"]}}}
 
 
@@ -191,13 +191,13 @@ def test_a_chosen_client_list_is_left_alone(monkeypatch):
 
     monkeypatch.setenv(config.PLAYER_CLIENT_ENV, "tv")
     error = DownloadError("The page needs to be reloaded.")
-    assert downloader.retry_opts(error) is None
+    assert downloader.retry_opts(error, {}) is None
 
 
 def test_every_other_error_gets_no_retry():
     from yt_dlp.utils import DownloadError
 
-    assert downloader.retry_opts(DownloadError("HTTP Error 404")) is None
+    assert downloader.retry_opts(DownloadError("HTTP Error 404"), {}) is None
 
 
 def test_the_reload_message_says_to_try_again_when_a_runtime_is_there(
@@ -243,7 +243,7 @@ def test_the_format_message_for_the_buttons_says_to_try_again(monkeypatch):
     fake_runtimes(monkeypatch, deno=("2.5.6", True))
     message = downloader.explain(
         DownloadError("Requested format is not available"), "video")
-    assert "Try again" in message
+    assert "try again" in message
 
 
 def test_probe_asks_a_second_time_and_reports_the_second_answer(monkeypatch):
@@ -297,3 +297,129 @@ def test_a_second_refusal_is_reported_in_words(monkeypatch):
     monkeypatch.setattr(downloader, "_extract", fake)
     with pytest.raises(ValueError, match="JavaScript runtime"):
         downloader.probe("https://example.com/x")
+
+
+FORMAT_ERROR = ("ERROR: [youtube] kzWg5jVuHUI: Requested format is not "
+                "available. Use --list-formats for a list of available formats")
+
+
+def test_the_format_error_asks_again_without_the_cookies():
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError(FORMAT_ERROR)
+    assert downloader.retry_opts(error, {"cookiefile": "/tmp/c.txt"}) == {
+        "cookiefile": None, "cookiesfrombrowser": None}
+
+
+def test_the_browser_cookies_are_dropped_the_same_way():
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError(FORMAT_ERROR)
+    assert downloader.retry_opts(
+        error, {"cookiesfrombrowser": ("firefox", None, None, None)}) == {
+            "cookiefile": None, "cookiesfrombrowser": None}
+
+
+def test_the_format_error_without_cookies_has_nothing_left_to_try():
+    from yt_dlp.utils import DownloadError
+
+    assert downloader.retry_opts(DownloadError(FORMAT_ERROR), {}) is None
+
+
+def test_the_second_attempt_carries_no_cookie(monkeypatch, tmp_path):
+    from yt_dlp.utils import DownloadError
+
+    from app import cookiestore, jobs
+
+    monkeypatch.setenv(config.TEMP_ROOT_ENV, str(tmp_path / "work"))
+    cookiestore.save(".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tabc")
+    seen = []
+
+    def fake(opts, url, download):
+        seen.append(opts.get("cookiefile"))
+        if len(seen) == 1:
+            raise DownloadError(FORMAT_ERROR)
+        (pathlib.Path(opts["paths"]["home"]) / "clip.mp4").write_bytes(b"x" * 9)
+        return {"title": "no cookies, no gate"}
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    store = jobs.JobStore(tmp_path, ttl_seconds=600)
+    job = store.create("https://example.com/x", "video")
+    downloader.run(job, store)
+    assert store.get(job.id).state == jobs.READY
+    assert seen[0] is not None
+    assert seen[1] is None
+
+
+def test_what_yt_dlp_says_is_kept_from_the_first_attempt(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    def fake(opts, url, download):
+        # Every attempt keeps the warnings, so a failure with nothing to
+        # retry can still say why it failed.
+        assert opts["no_warnings"] is False
+        opts["logger"].warning("Some web client https formats have been "
+                               "skipped as they are missing a PO token")
+        raise DownloadError(FORMAT_ERROR)
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    with pytest.raises(downloader.Refused, match="token"):
+        downloader.probe("https://example.com/x")
+
+
+def test_the_message_names_sabr_when_yt_dlp_does(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    notes = downloader.Notes()
+    notes.warning("YouTube is forcing SABR streaming for this client")
+    message = downloader.explain(DownloadError(FORMAT_ERROR), "video", notes)
+    assert "streaming protocol" in message
+
+
+def test_the_notes_keep_nothing_that_does_not_explain_a_failure():
+    notes = downloader.Notes()
+    notes.debug("[debug] Loading cookies for a SECRET account")
+    notes.info("[youtube] kzWg5jVuHUI: Downloading webpage")
+    assert notes.lines == []
+    assert notes.mentions("secret") is False
+
+
+def test_the_notes_keep_the_line_that_does():
+    notes = downloader.Notes()
+    notes.debug("web client https formats require a GVS PO Token which was "
+                "not provided")
+    assert notes.mentions("po token") is True
+
+
+def test_the_lines_never_reach_the_page():
+    notes = downloader.Notes()
+    notes.warning("web formats have been skipped: SECRET-VALUE missing a URL")
+    message = downloader.explain(
+        ValueError("Requested format is not available"), "video", notes)
+    assert "SECRET-VALUE" not in message
+
+
+def test_the_notes_do_not_grow_without_a_limit():
+    notes = downloader.Notes()
+    for number in range(downloader.Notes.LIMIT + 50):
+        notes.debug(f"line {number} formats have been skipped")
+    assert len(notes.lines) == downloader.Notes.LIMIT
+
+
+def test_a_cancelled_job_is_never_retried(monkeypatch, tmp_path):
+    from app import jobs
+
+    calls = []
+
+    def fake(opts, url, download):
+        calls.append(1)
+        raise jobs.JobCancelled()
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    store = jobs.JobStore(tmp_path, ttl_seconds=600)
+    job = store.create("https://example.com/x", "video")
+    downloader.run(job, store)
+    assert len(calls) == 1
+    assert store.get(job.id) is None

@@ -297,6 +297,38 @@ Do these checks in order.
 | File download | let a job finish | the file arrives, and the transfer starts at once |
 | Logs | `journalctl -u ytdlp-web -f` | no repeated restart |
 
+## 11. Cookies for the video site
+
+Skip this section until a download fails with this line:
+
+```
+Sign in to confirm you're not a bot
+```
+
+The site wants a signed in visitor. It asks a server address more often than it asks a home connection, because many people share one server address.
+
+Export the cookies of a browser that is signed in, following `docs/cookies.md`, and copy the file to the server. The file holds a live session of that account, so root owns it and only the service reads it:
+
+```bash
+install -o root -g ytdlp -m 640 cookies.txt /etc/yt-dlp-web/cookies.txt
+```
+
+Add this line to `/etc/yt-dlp-web/ytdlp-web.env`:
+
+```
+YTDLP_WEB_COOKIES=/etc/yt-dlp-web/cookies.txt
+```
+
+Restart the service:
+
+```bash
+systemctl restart ytdlp-web
+```
+
+The unit needs no change. The application copies the file for each download and never writes the one you placed, so the read-only `/etc` of the hardened unit is fine. The service refuses to start when the variable names a file that is absent or unreadable, and the log says which.
+
+A session does not last forever. When the message returns, export the file again and replace it.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -308,6 +340,8 @@ Do these checks in order.
 | The login always fails | `YTDLP_WEB_PASSWORD` is not set, or the service still runs with the old value | check `/etc/yt-dlp-web/ytdlp-web.env`, then run `systemctl restart ytdlp-web` |
 | A job fails with a write error | the `ytdlp` user cannot write in the work directory | run `chown -R ytdlp:ytdlp /var/lib/ytdlp-web` |
 | A login attempt returns 429 | the nginx rate limit stopped it (5 per minute per address) | wait one minute, or raise the rate in the `limit_req_zone` line |
+| A download fails with "Sign in to confirm you're not a bot" | the site wants a signed in visitor, and it asks a server address more often than a home one | give the service a cookie file, as section 11 describes |
+| The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
 
 ## Keeping it working
 

@@ -82,6 +82,7 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         config.check_startup()
+        config.check_cookies()
         # Wrap the socket layer once, so a redirect to a private address
         # is caught at connection time and not only before the request.
         urlguard.install()

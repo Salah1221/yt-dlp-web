@@ -13,6 +13,12 @@ JOB_TTL_SECONDS = 1800
 CLEANUP_INTERVAL_SECONDS = 60
 
 TEMP_ROOT_ENV = "YTDLP_WEB_TEMP_ROOT"
+COOKIE_FILE_ENV = "YTDLP_WEB_COOKIES"
+COOKIE_BROWSER_ENV = "YTDLP_WEB_COOKIES_FROM_BROWSER"
+
+# downloader.cookie_opts writes one file with this prefix for each call
+# into yt-dlp, and the janitor sweeps up one that a crash left behind.
+COOKIE_COPY_PREFIX = "cookies-"
 
 
 def temp_root() -> Path:
@@ -88,6 +94,55 @@ def min_free_bytes() -> int:
     """
     limit = max_filesize()
     return limit * 3 if limit else 0
+
+
+def cookie_file() -> Path | None:
+    """Return the cookies.txt file to send to the site, or None.
+
+    A site that asks the server to prove it is not a robot accepts the
+    request when it carries the cookies of a signed in browser. The
+    operator exports them once and names the file in the environment.
+    """
+    value = _text(COOKIE_FILE_ENV)
+    return Path(value).expanduser() if value else None
+
+
+def cookies_from_browser() -> tuple[str | None, ...] | None:
+    """Return the browser to read cookies from, in the yt-dlp form.
+
+    The value is written the way the yt-dlp command line writes it:
+    BROWSER[+KEYRING][:PROFILE][::CONTAINER], for example `firefox` or
+    `chrome:Default`. This reads a browser profile on the machine that
+    runs the server, so it suits a desktop and not a server.
+    """
+    value = _text(COOKIE_BROWSER_ENV)
+    if value is None:
+        return None
+    head, _, container = value.partition("::")
+    head, _, profile = head.partition(":")
+    browser, _, keyring = head.partition("+")
+    return (browser.strip().lower(), profile.strip() or None,
+            keyring.strip().upper() or None, container.strip() or None)
+
+
+def check_cookies() -> None:
+    """Refuse to start when the cookie file is named but unusable.
+
+    A missing file is silent otherwise: yt-dlp sends no cookie and the
+    site answers with the robot check, which reads like a fault in the
+    application and not like a fault in the setting.
+    """
+    path = cookie_file()
+    if path is None:
+        return
+    if not path.is_file():
+        raise RuntimeError(
+            f"{COOKIE_FILE_ENV} is {path}, and no file is there. Export the "
+            "cookies again, or clear the variable.")
+    if not os.access(path, os.R_OK):
+        raise RuntimeError(
+            f"{COOKIE_FILE_ENV} is {path}, and this user cannot read it. "
+            "Give the service user read access to that file.")
 
 
 def is_loopback_host(name: str) -> bool:

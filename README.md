@@ -76,6 +76,22 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_MAX_FILESIZE` | no limit | the largest file, in bytes |
 | `YTDLP_WEB_MAX_JOBS` | 2 | how many downloads run together |
 | `YTDLP_WEB_TTL` | 1800 | seconds before an uncollected file is deleted |
+| `YTDLP_WEB_COOKIES` | none | a `cookies.txt` file to send to the site |
+| `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
+
+### "Sign in to confirm you're not a bot"
+
+A site answers that way when it wants a signed in visitor. It asks a server
+more often than a home connection, because many people share one server
+address. Export the cookies of a browser that is signed in, name the file in
+`YTDLP_WEB_COOKIES`, and restart the server. `docs/cookies.md` holds the
+steps, and the page then says what to do as well.
+
+On your own machine, `YTDLP_WEB_COOKIES_FROM_BROWSER=firefox` reads the
+browser profile instead, and no export is needed.
+
+The cookie file holds a live session of your account. Give it mode 640 and
+keep it out of the code folder.
 
 ### The outbound address guard
 

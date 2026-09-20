@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -12,6 +17,10 @@ from . import config, jobs, urlguard
 SKIP_SUFFIXES = (".part", ".ytdl", ".temp")
 
 MODES = ("video", "audio", "format")
+
+# YouTube writes this when it wants a signed in visitor. The apostrophe in
+# "you're" is a curly one in the real message, so the marks go around it.
+BOT_CHECK_MARKS = ("sign in to confirm", "not a bot")
 
 # 150 bytes keeps the whole path under the Windows limit.
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
@@ -74,6 +83,58 @@ def build_opts(mode: str, workdir: str, format_id: str | None = None,
         opts["format"] = f"{format_id}+ba/{format_id}"
 
     return opts
+
+
+@contextmanager
+def cookie_opts() -> Iterator[dict]:
+    """Yield the yt-dlp options that carry the site cookies.
+
+    yt-dlp writes the jar back to the cookie file when it closes, and two
+    jobs can run at the same time, so each call reads its own copy. The
+    file the operator placed is never written, which also lets it live on
+    a read-only path.
+    """
+    opts: dict = {}
+    browser = config.cookies_from_browser()
+    if browser:
+        opts["cookiesfrombrowser"] = browser
+    source = config.cookie_file()
+    if source is None:
+        yield opts
+        return
+    root = config.temp_root()
+    root.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix=config.COOKIE_COPY_PREFIX,
+                                    suffix=".txt", dir=root)
+    os.close(handle)
+    copy = Path(name)
+    try:
+        shutil.copyfile(source, copy)
+        opts["cookiefile"] = str(copy)
+        yield opts
+    finally:
+        copy.unlink(missing_ok=True)
+
+
+def explain(error: Exception) -> str:
+    """Return the message for the page, in place of the yt-dlp one.
+
+    The robot check is the one failure that a person can act on, and the
+    yt-dlp text tells them to pass a command line option that this
+    application has no command line for.
+    """
+    text = str(error)
+    lowered = text.lower()
+    if not all(mark in lowered for mark in BOT_CHECK_MARKS):
+        return text
+    if config.cookie_file() or config.cookies_from_browser():
+        return ("the site refused the cookies of this server. Export them "
+                "again from a browser that is signed in to the site, replace "
+                "the cookie file, and restart the server.")
+    return ("the site asks this server to sign in and prove it is not a "
+            "robot. Export the cookies of a signed in browser to a "
+            f"cookies.txt file, set {config.COOKIE_FILE_ENV} to that file, "
+            "and restart the server. docs/cookies.md holds the steps.")
 
 
 def find_output(workdir: str | Path) -> Path | None:
@@ -157,13 +218,20 @@ def probe(url: str) -> dict:
     """Read the video data without a download."""
     allow_private = not config.block_private_addresses()
     urlguard.check_url(url, allow_private=allow_private)
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-            "noplaylist": True}
     # The guard stays on for the whole call, so a redirect to a private
     # address is refused at connection time as well.
-    with urlguard.guarded(allow_private=allow_private):
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+    with cookie_opts() as cookies:
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "noplaylist": True, **cookies}
+        try:
+            with urlguard.guarded(allow_private=allow_private):
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+        except Exception as error:  # yt-dlp raises many types
+            message = explain(error)
+            if message == str(error):
+                raise
+            raise ValueError(message) from error
     if info is None:
         raise ValueError("this URL gives no video")
     if info.get("_type") == "playlist":
@@ -220,15 +288,16 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
                       postprocessor_hook=postprocessor_hook)
     try:
         urlguard.check_url(job.url, allow_private=allow_private)
-        with urlguard.guarded(allow_private=allow_private):
-            with YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(job.url, download=True)
+        with cookie_opts() as cookies:
+            with urlguard.guarded(allow_private=allow_private):
+                with YoutubeDL({**opts, **cookies}) as ydl:
+                    info = ydl.extract_info(job.url, download=True)
     except jobs.JobCancelled:
         jobs.delete_workdir(job)
         store.remove(job.id)
         return
     except Exception as error:  # yt-dlp raises many types
-        store.update(job.id, state=jobs.ERROR, error=str(error))
+        store.update(job.id, state=jobs.ERROR, error=explain(error))
         send()
         jobs.delete_workdir(job)
         return

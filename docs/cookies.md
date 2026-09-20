@@ -160,19 +160,32 @@ argue with it.
 ERROR: [youtube] kzWg5jVuHUI: Requested format is not available.
 ```
 
-YouTube served the page and nothing on it could be downloaded.
+YouTube served the page and nothing on it could be downloaded. Three things
+do this, and the page names the one that happened.
 
-Nearly always this is the JavaScript runtime. A stream whose signature
-nothing can read is dropped from the list, so the list empties and the
-chooser reaches the end of it. The section below installs one, and the page
-says so in place of this message when the server has none.
+**No JavaScript runtime.** A stream whose signature nothing can read is
+dropped from the list, so the list empties and the chooser reaches the end of
+it. The section below installs one. This is the common one, and the startup
+log says whether it applies.
 
-With a runtime in place, two other things give it. YouTube does this to a
-signed in visitor now and then, and it passes, so try again in a minute. And
-a format taken from the **Choose a format** list can be gone by the time you
-press it, because YouTube serves a different list to each of the clients it
-answers. Press Check again to take a fresh list, or use the Video MP4
-button, which takes what is there.
+**A token that YouTube gives a browser and not a server.** With a runtime in
+place, this is the one that is left. YouTube asks a *signed in* visitor for
+that token far more often than it asks anybody else, so the cookies that
+answered the robot check are what brought this on. The application notices
+and asks a second time with the cookies left off, which reaches the clients
+that still answer, so most of the time the download goes through and you see
+nothing.
+
+When it does not, the cookies are worth taking out in Settings and trying
+again. A video that needs the sign in will then say so instead, which is a
+clearer place to be. The lasting answer for an account that keeps meeting
+this is a plugin that mints the token, described in the yt-dlp wiki page *PO
+Token Guide*.
+
+**A stale format.** A format taken from the **Choose a format** list can be
+gone by the time you press it, because YouTube serves a different list to
+each of the clients it answers. Press Check again to take a fresh list, or
+use the Video MP4 button, which takes what is there.
 
 ## Without a cookie file
 

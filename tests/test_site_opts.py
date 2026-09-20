@@ -207,8 +207,9 @@ def test_the_reload_error_asks_the_rest_of_the_clients():
 
     error = DownloadError("ERROR: [youtube] kzWg5jVuHUI: "
                           "The page needs to be reloaded.")
-    assert downloader.retry_opts(error, {}) == {"extractor_args": {
-        "youtube": {"player_client": ["default", "-tv_downgraded"]}}}
+    assert downloader.next_fallback(error, {}, ()) == ("clients", {
+        "extractor_args": {
+            "youtube": {"player_client": ["default", "-tv_downgraded"]}}})
 
 
 def test_the_client_yt_dlp_refuses_is_one_it_knows():
@@ -222,13 +223,16 @@ def test_a_chosen_client_list_is_left_alone(monkeypatch):
 
     monkeypatch.setenv(config.PLAYER_CLIENT_ENV, "tv")
     error = DownloadError("The page needs to be reloaded.")
-    assert downloader.retry_opts(error, {}) is None
+    # The named list is theirs to keep, so only the cookies may go, and
+    # there are none here.
+    assert downloader.next_fallback(error, {}, ()) is None
 
 
 def test_every_other_error_gets_no_retry():
     from yt_dlp.utils import DownloadError
 
-    assert downloader.retry_opts(DownloadError("HTTP Error 404"), {}) is None
+    assert downloader.next_fallback(
+        DownloadError("HTTP Error 404"), {}, ()) is None
 
 
 def test_the_reload_message_says_to_try_again_when_a_runtime_is_there(
@@ -341,26 +345,63 @@ def test_the_format_error_asks_again_without_the_cookies():
     from yt_dlp.utils import DownloadError
 
     error = DownloadError(FORMAT_ERROR)
-    assert downloader.retry_opts(error, {"cookiefile": "/tmp/c.txt"}) == {
-        "cookiefile": None, "cookiesfrombrowser": None}
+    assert downloader.next_fallback(
+        error, {"cookiefile": "/tmp/c.txt"}, ("clients",)) == (
+            "cookies", {"cookiefile": None, "cookiesfrombrowser": None})
 
 
 def test_the_browser_cookies_are_dropped_the_same_way():
     from yt_dlp.utils import DownloadError
 
     error = DownloadError(FORMAT_ERROR)
-    assert downloader.retry_opts(
-        error, {"cookiesfrombrowser": ("firefox", None, None, None)}) == {
-            "cookiefile": None, "cookiesfrombrowser": None}
+    assert downloader.next_fallback(
+        error, {"cookiesfrombrowser": ("firefox", None, None, None)},
+        ("clients",)) == (
+            "cookies", {"cookiefile": None, "cookiesfrombrowser": None})
 
 
 def test_the_format_error_without_cookies_has_nothing_left_to_try():
     from yt_dlp.utils import DownloadError
 
-    assert downloader.retry_opts(DownloadError(FORMAT_ERROR), {}) is None
+    assert downloader.next_fallback(
+        DownloadError(FORMAT_ERROR), {}, ("clients",)) is None
 
 
-def test_the_second_attempt_carries_no_cookie(monkeypatch, tmp_path):
+def test_the_ladder_drops_the_refused_client_then_the_cookies(monkeypatch,
+                                                              tmp_path):
+    from yt_dlp.utils import DownloadError
+
+    from app import cookiestore, jobs
+
+    monkeypatch.setenv(config.TEMP_ROOT_ENV, str(tmp_path / "work"))
+    cookiestore.save(".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tabc")
+    seen = []
+
+    def fake(opts, url, download):
+        seen.append((opts.get("cookiefile"),
+                     opts["extractor_args"]["youtube"]["player_client"]))
+        if len(seen) < 3:
+            raise DownloadError(FORMAT_ERROR)
+        (pathlib.Path(opts["paths"]["home"]) / "clip.mp4").write_bytes(b"x" * 9)
+        return {"title": "the third time"}
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    store = jobs.JobStore(tmp_path, ttl_seconds=600)
+    job = store.create("https://example.com/x", "video")
+    downloader.run(job, store)
+
+    assert store.get(job.id).state == jobs.READY
+    # The sign in is kept while the cheap rung is taken.
+    assert seen[0][0] is not None
+    assert downloader.REFUSED_CLIENT in seen[0][1]
+    assert seen[1][0] is not None
+    assert downloader.REFUSED_CLIENT not in seen[1][1]
+    # Then the cookies go, and the reduced list stays reduced.
+    assert seen[2][0] is None
+    assert seen[2][1] == seen[1][1]
+
+
+def test_the_reload_error_walks_the_same_ladder(monkeypatch, tmp_path):
     from yt_dlp.utils import DownloadError
 
     from app import cookiestore, jobs
@@ -371,18 +412,40 @@ def test_the_second_attempt_carries_no_cookie(monkeypatch, tmp_path):
 
     def fake(opts, url, download):
         seen.append(opts.get("cookiefile"))
-        if len(seen) == 1:
-            raise DownloadError(FORMAT_ERROR)
+        if len(seen) < 3:
+            # This is what YouTube says to a signed in visitor on the
+            # clients it has stopped serving.
+            raise DownloadError("ERROR: [youtube] x: The page needs to be "
+                                "reloaded.")
         (pathlib.Path(opts["paths"]["home"]) / "clip.mp4").write_bytes(b"x" * 9)
-        return {"title": "no cookies, no gate"}
+        return {"title": "as nobody"}
 
     monkeypatch.setattr(downloader, "_extract", fake)
     store = jobs.JobStore(tmp_path, ttl_seconds=600)
     job = store.create("https://example.com/x", "video")
     downloader.run(job, store)
+
     assert store.get(job.id).state == jobs.READY
-    assert seen[0] is not None
-    assert seen[1] is None
+    assert seen[2] is None
+
+
+def test_the_message_says_it_was_tried_both_ways(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    error = DownloadError("The page needs to be reloaded.")
+    assert "without them" in downloader.explain(
+        error, "video", None, ("clients", "cookies"))
+    assert "without them" not in downloader.explain(error, "video", None, ())
+
+
+def test_a_ladder_rung_is_taken_once(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError(FORMAT_ERROR)
+    opts = {"cookiefile": "/tmp/c.txt",
+            "extractor_args": {"youtube": {"player_client": ["tv"]}}}
+    assert downloader.next_fallback(error, opts, ("cookies",)) is None
 
 
 def test_what_yt_dlp_says_is_kept_from_the_first_attempt(monkeypatch):
@@ -465,8 +528,9 @@ def test_the_reload_retry_keeps_the_other_clients(monkeypatch):
     error = DownloadError("The page needs to be reloaded.")
     opts = {"extractor_args": {"youtube": {
         "player_client": ["tv", "tv_downgraded", "web_embedded"]}}}
-    assert downloader.retry_opts(error, opts) == {"extractor_args": {
-        "youtube": {"player_client": ["tv", "web_embedded"]}}}
+    assert downloader.next_fallback(error, opts, ()) == ("clients", {
+        "extractor_args": {
+            "youtube": {"player_client": ["tv", "web_embedded"]}}})
 
 
 def test_the_reload_retry_stops_when_there_is_nothing_to_drop(monkeypatch):
@@ -474,7 +538,7 @@ def test_the_reload_retry_stops_when_there_is_nothing_to_drop(monkeypatch):
 
     error = DownloadError("The page needs to be reloaded.")
     opts = {"extractor_args": {"youtube": {"player_client": ["tv"]}}}
-    assert downloader.retry_opts(error, opts) is None
+    assert downloader.next_fallback(error, opts, ()) is None
 
 
 def test_each_attempt_keeps_its_own_notes(monkeypatch):
@@ -497,9 +561,10 @@ def test_each_attempt_keeps_its_own_notes(monkeypatch):
         raise DownloadError(FORMAT_ERROR)
 
     monkeypatch.setattr(downloader, "_extract", fake)
-    monkeypatch.setattr(downloader, "retry_opts",
-                        lambda error, opts: {"cookiefile": None,
-                                             "cookiesfrombrowser": None})
+    monkeypatch.setattr(downloader, "next_fallback",
+                        lambda error, opts, spent: None if spent else
+                        ("cookies", {"cookiefile": None,
+                                     "cookiesfrombrowser": None}))
     with pytest.raises(downloader.Refused) as caught:
         downloader.probe("https://example.com/x")
     # The message names what stopped the attempt that failed last, not

@@ -122,14 +122,12 @@ way. See `YTDLP_WEB_JS_RUNTIMES` below. The page names which it was, and
 
 ### "The page needs to be reloaded"
 
-This arrives once the cookies are in place. yt-dlp asks a different set of
-YouTube clients as soon as cookies are in play, and YouTube has stopped
-serving one of that set. The application asks the rest of the set once more
-by itself, so it usually passes without you seeing it.
+YouTube has stopped serving the client that asked. The application drops that
+client and asks the rest, then asks again with the cookies left off, because
+signing in is what moves yt-dlp onto the clients YouTube treats worst. The
+message arrives only when neither worked, and it says which ways were tried.
 
-When it does not, it comes and goes on the YouTube side, so try again in a
-minute. If it stays, the server has no JavaScript runtime and every client
-answers this way. See `YTDLP_WEB_JS_RUNTIMES` below.
+It comes and goes on the YouTube side, so try again in a minute.
 
 Two settings can help without a cookie, and neither always works:
 

@@ -104,6 +104,11 @@ def _values(jar: YoutubeDLCookieJar) -> set:
              cookie.expires) for cookie in jar}
 
 
+def _names(jar: YoutubeDLCookieJar) -> set:
+    """Return which cookies a jar holds, whatever their values are."""
+    return {(cookie.domain, cookie.path, cookie.name) for cookie in jar}
+
+
 def _place(body: str, store: Path) -> None:
     """Put this text at the store path, readable by nobody else."""
     handle, name = tempfile.mkstemp(prefix=".cookies-", dir=store.parent)
@@ -126,6 +131,9 @@ def refresh(copy: Path, stamp: float) -> bool:
     refreshed cookies would go with the copy and the saved ones would
     age out in a few days.
 
+    Only a rotation is taken back. A jar that came back with a cookie
+    missing is a sign out, and the saved file stands.
+
     `stamp` is the time the store carried when the copy was taken. A
     store that changed since then belongs to a download that ended
     later, and the newer one stands.
@@ -135,7 +143,18 @@ def refresh(copy: Path, stamp: float) -> bool:
         try:
             if not store.is_file() or store.stat().st_mtime != stamp:
                 return False
-            if _values(_jar(store)) == _values(_jar(copy)):
+            before = _jar(store)
+            after = _jar(copy)
+            if _names(before) - _names(after):
+                # The site took cookies away rather than handing new
+                # values for them. That is a sign out, not a rotation,
+                # and it is what a site does when it refuses a session.
+                # Writing it back would spend the saved cookies on the
+                # first download that failed, and every download after
+                # it would be a stranger with no way back but another
+                # export. The saved file stands.
+                return False
+            if _values(before) == _values(after):
                 return False
             _place(copy.read_text(encoding="utf-8"), store)
         except OSError:

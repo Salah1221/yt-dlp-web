@@ -295,6 +295,13 @@ that, a saved file would age out in days and the messages above would come
 back. The panel still shows the day you saved it, because a download is not
 a save.
 
+Only a rotation is taken back. A site that refuses a session answers by
+taking the cookies away rather than by handing new values for them, and a
+jar that came back with a cookie missing is left where it fell. Otherwise
+the first download that failed would spend the cookies you had just saved,
+and every download after it would be a stranger with no way back but another
+export.
+
 A file that the operator placed and named in `YTDLP_WEB_COOKIES` is never
 written back, because it can be owned by root on a read-only path. Such a
 file ages, which is one more reason to prefer the panel.
@@ -305,6 +312,11 @@ A session does not last forever. The site can end it, and then the robot
 message returns and the page says the cookies were refused. Export the file
 again from step 1 and save it again in the Settings panel. That is the whole
 repair, and it is why the panel exists.
+
+Fresh cookies that are refused just as fast are saying something else. The
+account is not what the site is refusing then; the address this server sends
+from is, and one more export will not change that. The plugin at the end of
+*Without a cookie file* is what answers it.
 
 A file exported from an account you care about is a file worth protecting. A
 second account, used for nothing else, keeps the risk small.

@@ -160,32 +160,63 @@ argue with it.
 ERROR: [youtube] kzWg5jVuHUI: Requested format is not available.
 ```
 
-YouTube served the page and nothing on it could be downloaded. Three things
-do this, and the page names the one that happened.
+YouTube served the page and nothing on it could be downloaded.
+
+**The token.** YouTube hands a proof token to a browser and not to a server,
+and yt-dlp drops every stream of a client that wants one. Its own favourite
+clients want one, and signing in moves it onto more of them, so a server with
+cookies ends up with an empty list.
+
+The application asks for the clients that want no token instead. It reads
+which those are out of yt-dlp itself rather than naming them here, so a
+client that changes side is followed without a change to this application.
+Today they are `tv`, `tv_downgraded`, `web_embedded`, and `visionos`, and the
+first of those takes cookies, so a signed in download still works.
+
+That is the fix for this message, and it needs nothing installed. The rest of
+this section is for a server where it is not enough.
 
 **No JavaScript runtime.** A stream whose signature nothing can read is
-dropped from the list, so the list empties and the chooser reaches the end of
-it. The section below installs one. This is the common one, and the startup
-log says whether it applies.
+dropped in the same way. The section below installs one, and the startup log
+says whether this applies.
 
-**A token that YouTube gives a browser and not a server.** With a runtime in
-place, this is the one that is left. YouTube asks a *signed in* visitor for
-that token far more often than it asks anybody else, so the cookies that
-answered the robot check are what brought this on. The application notices
-and asks a second time with the cookies left off, which reaches the clients
-that still answer, so most of the time the download goes through and you see
-nothing.
+**A stale format.** A format from the **Choose a format** list can be gone by
+the time you press it, because YouTube serves a different list to each
+client. Press Check again, or use the Video MP4 button.
 
-When it does not, the cookies are worth taking out in Settings and trying
-again. A video that needs the sign in will then say so instead, which is a
-clearer place to be. The lasting answer for an account that keeps meeting
-this is a plugin that mints the token, described in the yt-dlp wiki page *PO
-Token Guide*.
+### When the token is wanted anyway
 
-**A stale format.** A format taken from the **Choose a format** list can be
-gone by the time you press it, because YouTube serves a different list to
-each of the clients it answers. Press Check again to take a fresh list, or
-use the Video MP4 button, which takes what is there.
+Some videos are served to no client without a token. The page says so, and a
+plugin mints the token for yt-dlp: `bgutil-ytdlp-pot-provider`.
+
+```bash
+/opt/ytdlp-web/.venv/bin/pip install bgutil-ytdlp-pot-provider
+```
+
+The plugin is the small half. It needs the generator beside it, as either a
+server it talks to over HTTP, or a script it runs itself. The script route
+suits this application, because the runtime it wants is the deno that is
+already installed, and it needs the generator source in the home of the
+service user:
+
+```
+~/bgutil-ytdlp-pot-provider/server/src/generate_once.ts
+```
+
+The project's own README has the steps that put it there and install its
+dependencies, and it wants deno 2.4.3 or later.
+
+Then hand the client choice back to yt-dlp, which can use every client once
+the token can be had:
+
+```
+YTDLP_WEB_PLAYER_CLIENT=default
+```
+
+The application does not look for the plugin by itself. A plugin that is
+installed and cannot reach its generator looks exactly like one that works,
+and believing it would put the server back on the clients that serve it
+nothing. Saying `default` is you saying that yours works.
 
 ## Without a cookie file
 

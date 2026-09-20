@@ -79,7 +79,7 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_COOKIES` | none | a `cookies.txt` file to send to the site |
 | `YTDLP_WEB_COOKIE_STORE` | beside the work folders | where the Settings panel saves the cookies |
 | `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
-| `YTDLP_WEB_PLAYER_CLIENT` | none | the YouTube clients to ask, in order, such as `tv,web_safari` |
+| `YTDLP_WEB_PLAYER_CLIENT` | the clients that need no proof token | the YouTube clients to ask, in order. `default` hands the choice back to yt-dlp |
 | `YTDLP_WEB_JS_RUNTIMES` | deno, or a supported runtime that is installed | the JavaScript runtimes yt-dlp may use, such as `node` |
 
 ### "Sign in to confirm you're not a bot"
@@ -108,16 +108,17 @@ keep it out of the code folder.
 
 ### "Requested format is not available"
 
-YouTube served the page and nothing on it could be downloaded. Usually the
-server has no JavaScript runtime, so every stream that carries a signature
-was dropped and the list ran out. See `YTDLP_WEB_JS_RUNTIMES` below.
+YouTube served the page and nothing on it could be downloaded. It hands a
+proof token to a browser and not to a server, and yt-dlp drops every stream
+of a client that wants one.
 
-With a runtime in place it is the token that YouTube gives a browser and not
-a server. It asks a signed in visitor for one far more often, so the
-application asks a second time with the cookies left off, which usually
-passes. When it does not, take the cookies out in Settings.
+The application asks for the clients that want no token, which it reads out
+of yt-dlp rather than naming them here. One of them takes cookies, so a
+signed in download still works. This needs nothing installed.
 
-The page names which of these it was.
+The other cause is a missing JavaScript runtime, which drops streams the same
+way. See `YTDLP_WEB_JS_RUNTIMES` below. The page names which it was, and
+`docs/cookies.md` covers the video that no client will serve without a token.
 
 ### "The page needs to be reloaded"
 
@@ -142,9 +143,9 @@ Two settings can help without a cookie, and neither always works:
   `docs/cookies.md` installs deno in four lines.
 - `YTDLP_WEB_PLAYER_CLIENT`. YouTube serves the same video to a phone, a
   television, and a browser, and it applies the check to each differently.
-  `YTDLP_WEB_PLAYER_CLIENT=tv,web_safari` asks them in that order. Which
-  client answers changes from month to month, so treat it as something to
-  try, not as a fix.
+  The application asks the clients that need no proof token; this names your
+  own list instead, and `default` hands the choice back to yt-dlp, which is
+  what a server with a token plugin wants.
 
 The check follows the address more than anything else. The same URL that
 fails on a rented server often works from a home connection, where this

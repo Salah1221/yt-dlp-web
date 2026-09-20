@@ -27,6 +27,11 @@ that must come up with cookies already in place.
 3. Press **Choose file** and pick the file, or paste its text into the box.
 4. Press **Save**.
 
+The box empties the moment it has the text, and the panel then says how much
+it holds and waits for Save. Nothing you put there stays on the page, so
+nobody can read it over your shoulder and no second copy can take it back
+out. What lands in the box before the page takes it is covered up as well.
+
 The panel then says how many cookies it holds, which sites they are for, and
 when the first one expires. The next download uses them. Nothing restarts.
 
@@ -34,9 +39,9 @@ Press **Choose file** rather than pasting when you can. A paste through some
 fields turns the tabs into spaces, and the format needs the tabs. The server
 says so when it happens, but the file button never has the problem.
 
-The page never shows the cookies again after you save them. It shows the
-count, the sites, and the dates, and no route sends the content back.
-**Remove** deletes the saved file.
+The page never shows the cookies. It shows the count, the sites, and the
+dates, and no route sends the content back. **Remove** deletes the saved
+file.
 
 Who can save them is who can open the page. In public mode that is the
 password, like the rest of the page. In local mode there is no password, so
@@ -54,7 +59,10 @@ valid.
 2. Sign in to the site.
 3. Open the video page once, so the session is complete.
 4. Export the cookies with a browser add-on that writes the Netscape format,
-   for example *Get cookies.txt LOCALLY*. Save the file as `cookies.txt`.
+   for example *Get cookies.txt LOCALLY*. An add-on that writes several
+   formats, such as *Cookie-Editor*, has to be set to Netscape: its own
+   default is JSON, which no cookie file reader takes. Save the file as
+   `cookies.txt`.
 5. Close the private window. **Do not press sign out.** Signing out ends the
    session, and the file you exported dies with it.
 

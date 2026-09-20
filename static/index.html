@@ -24,22 +24,38 @@
       A site answers with <em>Sign in to confirm you're not a bot</em> when it
       wants a signed in visitor. Export the cookies of a browser that is
       signed in, in the Netscape format that an add-on calls
-      <code>cookies.txt</code>, and put them here. They stay on the server,
-      and this page never shows them again.
+      <code>cookies.txt</code>, and put them here.
     </p>
-    <p id="cookie-state" class="note">Reading the settings</p>
-    <div class="field">
-      <label for="cookie-text">Paste the file, or choose it</label>
-      <textarea id="cookie-text" rows="6" spellcheck="false"
-                autocomplete="off" autocapitalize="off"
-                placeholder="# Netscape HTTP Cookie File"></textarea>
+
+    <p id="cookie-state" class="status">
+      <span id="cookie-dot" class="dot"></span>
+      <span id="cookie-state-text">Reading the settings</span>
+    </p>
+    <p id="cookie-detail" class="note small hidden"></p>
+
+    <div id="cookie-drop" class="drop">
+      <textarea id="cookie-text" rows="3" spellcheck="false"
+                autocomplete="off" autocapitalize="off" autocorrect="off"
+                aria-label="Paste the cookies here"
+                placeholder="Paste the cookies here"></textarea>
     </div>
+
+    <p id="cookie-ready" class="ready hidden">
+      <span id="cookie-ready-text"></span>
+      <button id="cookie-discard" type="button" class="link">Discard</button>
+    </p>
+
     <div class="settings-actions">
       <label for="cookie-file" class="button">Choose file</label>
       <input id="cookie-file" type="file" accept=".txt,text/plain" class="hidden">
-      <button id="cookie-save" type="button" class="primary">Save</button>
+      <button id="cookie-save" type="button" class="primary" disabled>Save</button>
       <button id="cookie-clear" type="button" class="quiet">Remove</button>
     </div>
+
+    <p class="note small">
+      The cookies go to the server and stay there. The box empties as soon as
+      it has them, so nothing on this page can be read back or copied again.
+    </p>
   </section>
 
   <form id="probe-form">

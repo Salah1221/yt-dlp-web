@@ -27,7 +27,9 @@ function humanSize(bytes) {
     value /= 1024;
     index += 1;
   }
-  return value.toFixed(1) + " " + units[index];
+  // A count of bytes has no half, so it reads as a whole number.
+  return (index === 0 ? String(Math.round(value)) : value.toFixed(1))
+    + " " + units[index];
 }
 
 function humanTime(seconds) {
@@ -262,52 +264,101 @@ el("logout").addEventListener("click", async () => {
 
 // --- The settings panel ---------------------------------------------------
 
+// The cookies wait here, and never in the box on the page. A paste goes
+// straight into this variable, so the page holds nothing that a person at
+// the screen can read, and nothing that a second copy can take back out.
+let pendingCookies = "";
+
+// Below this, what arrived is somebody typing, not a file landing.
+const PASTE_SIZE = 60;
+
 function whenText(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString(undefined,
     { year: "numeric", month: "short", day: "numeric" });
 }
 
+function setDot(kind) {
+  el("cookie-dot").className = "dot " + kind;
+  el("cookie-state").classList.toggle("bad", kind === "bad");
+}
+
+function showDetail(text) {
+  const node = el("cookie-detail");
+  node.textContent = text;
+  if (text) show(node); else hide(node);
+}
+
+function holdCookies(text) {
+  const body = (text || "").trim();
+  if (!body) return;
+  pendingCookies = body;
+  const lines = body.split("\n").filter((line) => line.trim()).length;
+  const many = lines === 1 ? "line" : "lines";
+  const size = humanSize(new Blob([body]).size);
+  el("cookie-ready-text").textContent =
+    `Ready to save: ${lines} ${many}, ${size}`;
+  el("cookie-text").value = "";
+  hide(el("cookie-drop"));
+  show(el("cookie-ready"));
+  el("cookie-save").disabled = false;
+}
+
+function dropCookies() {
+  pendingCookies = "";
+  el("cookie-text").value = "";
+  show(el("cookie-drop"));
+  hide(el("cookie-ready"));
+  el("cookie-save").disabled = true;
+}
+
 function renderCookies(state) {
-  const node = el("cookie-state");
-  node.classList.remove("bad");
+  el("cookie-state-text").textContent = describeCookies(state);
   el("cookie-clear").disabled = state.source !== "pasted";
+  setDot(state.source === "pasted" ? "good"
+    : state.source === "broken" ? "bad" : "none");
+  if (state.source !== "pasted") {
+    showDetail("");
+    return;
+  }
+  const parts = [];
+  if (state.domains.length) {
+    parts.push(state.more_domains
+      ? `${state.domains.join(", ")} and ${state.more_domains} more`
+      : state.domains.join(", "));
+  }
+  // The soonest expiry is the day the site starts asking again.
+  if (state.expires) parts.push(`the first expires ${whenText(state.expires)}`);
+  showDetail(parts.join("  ·  "));
+}
+
+function describeCookies(state) {
   if (state.source === "pasted") {
     const many = state.count === 1 ? "cookie" : "cookies";
-    const parts = [`${state.count} ${many} saved ${whenText(state.saved)}`];
-    if (state.domains.length) {
-      const names = state.domains.join(", ");
-      parts.push(state.more_domains
-        ? `for ${names} and ${state.more_domains} more`
-        : `for ${names}`);
-    }
-    // The soonest expiry is the day the site starts asking again.
-    if (state.expires) parts.push(`the first expires ${whenText(state.expires)}`);
-    node.textContent = parts.join(", ") + ".";
-    return;
+    return `${state.count} ${many} saved ${whenText(state.saved)}`;
   }
   if (state.source === "file") {
-    node.textContent = "The server is using a cookie file that the operator "
-      + "placed. Saving here replaces it, and Remove puts it back.";
-    return;
+    return "Using the file that the operator placed";
   }
   if (state.source === "broken") {
-    node.textContent = "The saved file no longer reads as cookies. Save a "
-      + "fresh export over it, or press Remove.";
-    return;
+    return "The saved file no longer reads as cookies";
   }
-  node.textContent = state.writable
-    ? "No cookies saved. The server sends none."
-    : "No cookies saved, and this server cannot write the file. Its folder "
-      + "belongs to another user.";
+  return state.writable
+    ? "No cookies saved"
+    : "No cookies saved, and this server cannot write the file";
+}
+
+function failCookies(text) {
+  el("cookie-state-text").textContent = text;
+  setDot("bad");
+  showDetail("");
 }
 
 async function loadCookies() {
   try {
     renderCookies(await (await fetch("/api/cookies")).json());
   } catch (error) {
-    el("cookie-state").textContent = "The settings did not load.";
-    el("cookie-state").classList.add("bad");
+    failCookies("The settings did not load.");
   }
 }
 
@@ -315,7 +366,31 @@ el("settings-toggle").addEventListener("click", () => {
   const panel = el("settings");
   const open = panel.classList.toggle("hidden") === false;
   el("settings-toggle").setAttribute("aria-expanded", String(open));
-  if (open) loadCookies();
+  if (open) loadCookies(); else dropCookies();
+});
+
+// The paste never reaches the box. Reading it here and stopping the event
+// keeps the cookies off the screen and out of the page.
+el("cookie-text").addEventListener("paste", (event) => {
+  const text = (event.clipboardData || window.clipboardData).getData("text");
+  if (!text) return;
+  event.preventDefault();
+  holdCookies(text);
+});
+
+el("cookie-text").addEventListener("drop", (event) => {
+  const data = event.dataTransfer;
+  const file = data.files && data.files[0];
+  event.preventDefault();
+  if (file) { file.text().then(holdCookies); return; }
+  holdCookies(data.getData("text"));
+});
+
+// A paste that arrives by another road, such as the middle button on Linux,
+// lands in the box. Anything file sized is taken out of it at once.
+el("cookie-text").addEventListener("input", (event) => {
+  const value = event.target.value;
+  if (value.length >= PASTE_SIZE || value.includes("\n")) holdCookies(value);
 });
 
 el("cookie-file").addEventListener("change", async (event) => {
@@ -323,27 +398,28 @@ el("cookie-file").addEventListener("change", async (event) => {
   if (!file) return;
   // Reading the file keeps the tabs, which a paste through some fields
   // turns into spaces. The format needs the tabs.
-  el("cookie-text").value = await file.text();
+  holdCookies(await file.text());
   event.target.value = "";
 });
 
+el("cookie-discard").addEventListener("click", dropCookies);
+
 el("cookie-save").addEventListener("click", async () => {
   const button = el("cookie-save");
+  const text = pendingCookies || el("cookie-text").value;
   button.disabled = true;
   button.textContent = "Saving";
   try {
-    const state = await sendJson("PUT", "/api/cookies",
-                                 { text: el("cookie-text").value });
-    // The page holds no copy of a credential longer than it must.
-    el("cookie-text").value = "";
+    const state = await sendJson("PUT", "/api/cookies", { text });
+    // Nothing of a credential stays on the page after it is saved.
+    dropCookies();
     renderCookies(state);
     clearFail();
   } catch (error) {
-    el("cookie-state").textContent = error.message;
-    el("cookie-state").classList.add("bad");
+    failCookies(error.message);
   } finally {
-    button.disabled = false;
     button.textContent = "Save";
+    button.disabled = !pendingCookies;
   }
 });
 

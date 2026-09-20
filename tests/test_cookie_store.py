@@ -1,6 +1,7 @@
 """The cookies that somebody pastes into the settings panel."""
 
 import os
+import pathlib
 
 import pytest
 
@@ -137,3 +138,67 @@ def test_a_folder_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
         assert cookiestore.status()["writable"] is False
     finally:
         os.chmod(locked, 0o700)
+
+
+def test_a_rotated_cookie_goes_back_into_the_store(store):
+    cookiestore.save(LINE)
+    stamp = store.stat().st_mtime
+    with downloader.site_opts() as opts:
+        copy = pathlib.Path(opts["cookiefile"])
+        # This is what yt-dlp writes when the site hands out a new value.
+        copy.write_text("# Netscape HTTP Cookie File\n"
+                        + LINE.replace("abc123", "rotated999") + "\n")
+    assert "rotated999" in store.read_text()
+    assert cookiestore.status()["count"] == 1
+
+
+def test_the_saved_time_survives_a_rotation(store):
+    cookiestore.save(LINE)
+    before = cookiestore.status()["saved"]
+    with downloader.site_opts() as opts:
+        pathlib.Path(opts["cookiefile"]).write_text(
+            "# Netscape HTTP Cookie File\n" + LINE.replace("abc123", "new") + "\n")
+    # The panel says when a person saved the cookies, not when a download
+    # last touched them.
+    assert cookiestore.status()["saved"] == before
+
+
+def test_a_download_that_changes_nothing_leaves_the_store_alone(store):
+    cookiestore.save(LINE)
+    before = store.read_bytes()
+    with downloader.site_opts():
+        pass
+    assert store.read_bytes() == before
+
+
+def test_a_store_that_moved_on_is_not_written_over(store):
+    cookiestore.save(LINE)
+    with downloader.site_opts() as opts:
+        copy = pathlib.Path(opts["cookiefile"])
+        copy.write_text("# Netscape HTTP Cookie File\n"
+                        + LINE.replace("abc123", "from-the-older-job") + "\n")
+        # Somebody saves a fresh export while the download runs.
+        cookiestore.save(OTHER)
+    assert "from-the-older-job" not in store.read_text()
+    assert "def456" in store.read_text()
+
+
+def test_removing_the_cookies_during_a_download_keeps_them_gone(store):
+    cookiestore.save(LINE)
+    with downloader.site_opts() as opts:
+        pathlib.Path(opts["cookiefile"]).write_text(
+            "# Netscape HTTP Cookie File\n" + LINE + "\n")
+        cookiestore.clear()
+    assert not store.exists()
+
+
+def test_the_placed_file_is_never_written_back(tmp_path, monkeypatch):
+    monkeypatch.setenv(config.TEMP_ROOT_ENV, str(tmp_path / "work"))
+    placed = tmp_path / "placed.txt"
+    placed.write_text(f"# Netscape HTTP Cookie File\n{LINE}\n")
+    monkeypatch.setenv(config.COOKIE_FILE_ENV, str(placed))
+    with downloader.site_opts() as opts:
+        pathlib.Path(opts["cookiefile"]).write_text(
+            "# Netscape HTTP Cookie File\n" + LINE.replace("abc123", "x") + "\n")
+    # It can be owned by root on a read-only path, so it is left as it is.
+    assert placed.read_text().endswith(LINE + "\n")

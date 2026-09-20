@@ -68,15 +68,16 @@ def test_the_page_offers_the_settings_button(client):
     page = client.get("/").text
     assert 'id="settings-toggle"' in page
     assert 'id="cookie-text"' in page
-    # The box empties into this, and Save sends what it holds.
-    assert 'id="cookie-ready"' in page
     assert 'id="cookie-save"' in page
+    # The panel is a dialog, so the page behind it goes soft.
+    assert "<dialog" in page
 
 
-def test_the_paste_box_is_masked_and_empties_itself(client):
+def test_the_paste_box_is_covered_and_empties_itself(client):
     script = client.get("/static/app.js").text
     style = client.get("/static/style.css").text
-    # The paste is taken out of the event, so it never lands in the box.
-    assert "event.preventDefault()" in script
-    assert "holdCookies" in script
+    # The box reads as a password field, and nothing stays in it: Save
+    # empties it, and so does closing the dialog.
     assert "-webkit-text-security" in style
+    assert "backdrop-filter" in style
+    assert script.count('el("cookie-text").value = ""') >= 2

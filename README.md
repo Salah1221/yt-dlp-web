@@ -90,8 +90,8 @@ address.
 
 Export the cookies of a browser that is signed in, press **Settings** on the
 page, choose the file, and press Save. The next download uses them, and
-nothing restarts. The box empties the moment it has the text, so nothing a
-person can read or copy again stays on the page. The panel shows how many
+nothing restarts. The box covers what goes into it and empties when you
+save, so nothing stays on the page. The panel shows how many
 cookies it holds and when the first one expires, and it never shows the
 cookies themselves. Remove deletes them.
 
@@ -105,6 +105,17 @@ browser profile instead, and no export is needed.
 
 The cookie file holds a live session of your account. Give it mode 640 and
 keep it out of the code folder.
+
+### "The page needs to be reloaded"
+
+This arrives once the cookies are in place. yt-dlp asks a different set of
+YouTube clients as soon as cookies are in play, and YouTube has stopped
+serving one of that set. The application asks the rest of the set once more
+by itself, so it usually passes without you seeing it.
+
+When it does not, it comes and goes on the YouTube side, so try again in a
+minute. If it stays, the server has no JavaScript runtime and every client
+answers this way. See `YTDLP_WEB_JS_RUNTIMES` below.
 
 Two settings can help without a cookie, and neither always works:
 

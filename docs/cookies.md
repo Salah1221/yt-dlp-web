@@ -27,10 +27,9 @@ that must come up with cookies already in place.
 3. Press **Choose file** and pick the file, or paste its text into the box.
 4. Press **Save**.
 
-The box empties the moment it has the text, and the panel then says how much
-it holds and waits for Save. Nothing you put there stays on the page, so
-nobody can read it over your shoulder and no second copy can take it back
-out. What lands in the box before the page takes it is covered up as well.
+The box covers what you put in it, the way a password field does, so nobody
+reads it over your shoulder. Save empties it, and so does closing the
+dialog.
 
 The panel then says how many cookies it holds, which sites they are for, and
 when the first one expires. The next download uses them. Nothing restarts.
@@ -39,9 +38,9 @@ Press **Choose file** rather than pasting when you can. A paste through some
 fields turns the tabs into spaces, and the format needs the tabs. The server
 says so when it happens, but the file button never has the problem.
 
-The page never shows the cookies. It shows the count, the sites, and the
-dates, and no route sends the content back. **Remove** deletes the saved
-file.
+After that the page never shows the cookies again. It shows the count, the
+sites, and the dates, and no route sends the content back. **Remove**
+deletes the saved file.
 
 Who can save them is who can open the page. In public mode that is the
 password, like the rest of the page. In local mode there is no password, so
@@ -128,6 +127,33 @@ they run, and a locked database gives an error in place of a download.
 This route needs a browser profile on the machine that runs the server, so it
 does not work on a server.
 
+## "The page needs to be reloaded"
+
+This one arrives after the cookies are in place, and it is the same gate
+wearing another coat:
+
+```
+ERROR: [youtube] kzWg5jVuHUI: The page needs to be reloaded.
+```
+
+yt-dlp asks a different set of YouTube clients as soon as cookies are in
+play, and YouTube has stopped serving one of that set. The application
+notices this message and asks the rest of the set once more by itself, so
+most of the time you never see it.
+
+When you do see it, two things cause it.
+
+It comes and goes on the YouTube side, so the first thing to do is to try
+again in a minute.
+
+If it stays, the server has no JavaScript runtime. YouTube now needs one,
+and without it every client answers this way. The section below says how to
+give the server one, and the startup log says whether it has one.
+
+Naming the clients yourself with `YTDLP_WEB_PLAYER_CLIENT` turns the second
+attempt off, because a named list is a choice and the application does not
+argue with it.
+
 ## Without a cookie file
 
 Three things change the answer, and none of them always works.
@@ -174,11 +200,21 @@ keep working, so try the three above first.
 
 ## What the application does with the file
 
-Each call into yt-dlp gets its own copy of the file, and the copy is deleted
-when the call ends. yt-dlp writes the cookie jar back when it closes, so
-without the copy two downloads at once would write over each other, and the
-file you placed would change under you. The copy also lets the file live on a
-read-only path, which is where the systemd unit puts it.
+Each call into yt-dlp gets its own copy of the file. yt-dlp writes the cookie
+jar back when it closes, so without the copy two downloads at once would
+write over each other. The copy also lets the file live on a read-only path,
+which is where the systemd unit puts it.
+
+The copy is not thrown away unread. A site hands out a fresh value for a
+cookie as it is used, and the old value stops working soon after, so what
+yt-dlp wrote goes back into the file that the Settings panel saved. Without
+that, a saved file would age out in days and the messages above would come
+back. The panel still shows the day you saved it, because a download is not
+a save.
+
+A file that the operator placed and named in `YTDLP_WEB_COOKIES` is never
+written back, because it can be owned by root on a read-only path. Such a
+file ages, which is one more reason to prefer the panel.
 
 ## When it stops working
 

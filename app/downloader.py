@@ -11,7 +11,7 @@ from pathlib import Path
 
 from yt_dlp import YoutubeDL
 
-from . import config, jobs, urlguard
+from . import config, cookiestore, jobs, urlguard
 
 # yt-dlp writes these while a download runs. They are never the result.
 SKIP_SUFFIXES = (".part", ".ytdl", ".temp")
@@ -21,6 +21,16 @@ MODES = ("video", "audio", "format")
 # YouTube writes this when it wants a signed in visitor. The apostrophe in
 # "you're" is a curly one in the real message, so the marks go around it.
 BOT_CHECK_MARKS = ("sign in to confirm", "not a bot")
+
+# And this when the client it picks for a signed in visitor is one it has
+# stopped serving. The cookie that answers the check above brings this one
+# in with it, because yt-dlp asks a different set of clients as soon as
+# cookies are in play.
+RELOAD_MARKS = ("page needs to be reloaded",)
+
+# The client in that set which YouTube is refusing. Dropping it leaves the
+# rest of the signed in set, which is what the yt-dlp issue recommends.
+REFUSED_CLIENT = "tv_downgraded"
 
 # 150 bytes keeps the whole path under the Windows limit.
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
@@ -96,6 +106,10 @@ def site_opts() -> Iterator[dict]:
     jobs can run at the same time, so each call reads its own copy. The
     file the operator placed is never written, which also lets it live on
     a read-only path.
+
+    The copy is not thrown away unread. A site rotates a cookie as it is
+    used, and the old value dies soon after, so what yt-dlp wrote to the
+    copy goes back into the store that the page owns.
     """
     opts: dict = {}
     runtimes = config.js_runtimes()
@@ -118,10 +132,16 @@ def site_opts() -> Iterator[dict]:
     os.close(handle)
     copy = Path(name)
     try:
+        stamp = source.stat().st_mtime
         shutil.copyfile(source, copy)
         opts["cookiefile"] = str(copy)
         yield opts
     finally:
+        # yt-dlp writes the jar back when it closes, and a site rotates a
+        # cookie as it is used. The new values are in the copy, so they go
+        # back to the store before the copy goes.
+        if source == config.cookie_store():
+            cookiestore.refresh(copy, stamp)
         copy.unlink(missing_ok=True)
 
 
@@ -158,6 +178,27 @@ def check_player_clients() -> None:
                 f"not know. The names are: {', '.join(sorted(known))}.")
 
 
+def _matches(error: Exception, marks: tuple[str, ...]) -> bool:
+    lowered = str(error).lower()
+    return all(mark in lowered for mark in marks)
+
+
+def retry_opts(error: Exception) -> dict | None:
+    """Return the options for a second attempt, or None for no second try.
+
+    YouTube refuses one of the clients that yt-dlp picks for a signed in
+    visitor, and the refusal comes and goes. Asking the rest of that set
+    costs one request and answers most of them.
+
+    An operator who named the clients has said what to ask, so their
+    choice stands and nothing is retried.
+    """
+    if not _matches(error, RELOAD_MARKS) or config.player_clients():
+        return None
+    return {"extractor_args": {
+        "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+
+
 def explain(error: Exception) -> str:
     """Return the message for the page, in place of the yt-dlp one.
 
@@ -166,8 +207,14 @@ def explain(error: Exception) -> str:
     application has no command line for.
     """
     text = str(error)
-    lowered = text.lower()
-    if not all(mark in lowered for mark in BOT_CHECK_MARKS):
+    if _matches(error, RELOAD_MARKS):
+        return ("YouTube refused the client that yt-dlp asks for a signed in "
+                "visitor, and it refused the rest of them as well. This one "
+                "comes and goes, so try again in a minute. If it stays, the "
+                "server has no JavaScript runtime, which YouTube now needs: "
+                f"install deno, or set {config.JS_RUNTIME_ENV} to a runtime "
+                "that is installed.")
+    if not _matches(error, BOT_CHECK_MARKS):
         return text
     if config.cookie_file() or config.cookies_from_browser():
         return ("the site refused the cookies of this server. Export them "
@@ -177,6 +224,12 @@ def explain(error: Exception) -> str:
             "robot. Export the cookies of a signed in browser to a "
             f"cookies.txt file, set {config.COOKIE_FILE_ENV} to that file, "
             "and restart the server. docs/cookies.md holds the steps.")
+
+
+def _extract(opts: dict, url: str, download: bool) -> dict | None:
+    """Run one yt-dlp call. Every call in this module goes through here."""
+    with YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=download)
 
 
 def find_output(workdir: str | Path) -> Path | None:
@@ -267,13 +320,19 @@ def probe(url: str) -> dict:
                 "noplaylist": True, **extra}
         try:
             with urlguard.guarded(allow_private=allow_private):
-                with YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
+                info = _extract(opts, url, download=False)
         except Exception as error:  # yt-dlp raises many types
-            message = explain(error)
-            if message == str(error):
-                raise
-            raise ValueError(message) from error
+            retry = retry_opts(error)
+            if retry is None:
+                message = explain(error)
+                if message == str(error):
+                    raise
+                raise ValueError(message) from error
+            try:
+                with urlguard.guarded(allow_private=allow_private):
+                    info = _extract({**opts, **retry}, url, download=False)
+            except Exception as second:
+                raise ValueError(explain(second)) from second
     if info is None:
         raise ValueError("this URL gives no video")
     if info.get("_type") == "playlist":
@@ -332,8 +391,16 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
         urlguard.check_url(job.url, allow_private=allow_private)
         with site_opts() as extra:
             with urlguard.guarded(allow_private=allow_private):
-                with YoutubeDL({**opts, **extra}) as ydl:
-                    info = ydl.extract_info(job.url, download=True)
+                try:
+                    info = _extract({**opts, **extra}, job.url, download=True)
+                except jobs.JobCancelled:
+                    raise
+                except Exception as error:  # yt-dlp raises many types
+                    retry = retry_opts(error)
+                    if retry is None:
+                        raise
+                    info = _extract({**opts, **extra, **retry}, job.url,
+                                    download=True)
     except jobs.JobCancelled:
         jobs.delete_workdir(job)
         store.remove(job.id)

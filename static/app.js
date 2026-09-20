@@ -38,6 +38,17 @@ function humanTime(seconds) {
   return minutes + "m " + String(rest).padStart(2, "0") + "s";
 }
 
+async function sendJson(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "the request failed");
+  return data;
+}
+
 async function postJson(path, body) {
   const response = await fetch(path, {
     method: "POST",
@@ -247,4 +258,96 @@ fetch("/api/config").then((response) => response.json()).then((data) => {
 el("logout").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });
   window.location.replace("/login");
+});
+
+// --- The settings panel ---------------------------------------------------
+
+function whenText(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(undefined,
+    { year: "numeric", month: "short", day: "numeric" });
+}
+
+function renderCookies(state) {
+  const node = el("cookie-state");
+  node.classList.remove("bad");
+  el("cookie-clear").disabled = state.source !== "pasted";
+  if (state.source === "pasted") {
+    const many = state.count === 1 ? "cookie" : "cookies";
+    const parts = [`${state.count} ${many} saved ${whenText(state.saved)}`];
+    if (state.domains.length) {
+      const names = state.domains.join(", ");
+      parts.push(state.more_domains
+        ? `for ${names} and ${state.more_domains} more`
+        : `for ${names}`);
+    }
+    // The soonest expiry is the day the site starts asking again.
+    if (state.expires) parts.push(`the first expires ${whenText(state.expires)}`);
+    node.textContent = parts.join(", ") + ".";
+    return;
+  }
+  if (state.source === "file") {
+    node.textContent = "The server is using a cookie file that the operator "
+      + "placed. Saving here replaces it, and Remove puts it back.";
+    return;
+  }
+  if (state.source === "broken") {
+    node.textContent = "The saved file no longer reads as cookies. Save a "
+      + "fresh export over it, or press Remove.";
+    return;
+  }
+  node.textContent = state.writable
+    ? "No cookies saved. The server sends none."
+    : "No cookies saved, and this server cannot write the file. Its folder "
+      + "belongs to another user.";
+}
+
+async function loadCookies() {
+  try {
+    renderCookies(await (await fetch("/api/cookies")).json());
+  } catch (error) {
+    el("cookie-state").textContent = "The settings did not load.";
+    el("cookie-state").classList.add("bad");
+  }
+}
+
+el("settings-toggle").addEventListener("click", () => {
+  const panel = el("settings");
+  const open = panel.classList.toggle("hidden") === false;
+  el("settings-toggle").setAttribute("aria-expanded", String(open));
+  if (open) loadCookies();
+});
+
+el("cookie-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  // Reading the file keeps the tabs, which a paste through some fields
+  // turns into spaces. The format needs the tabs.
+  el("cookie-text").value = await file.text();
+  event.target.value = "";
+});
+
+el("cookie-save").addEventListener("click", async () => {
+  const button = el("cookie-save");
+  button.disabled = true;
+  button.textContent = "Saving";
+  try {
+    const state = await sendJson("PUT", "/api/cookies",
+                                 { text: el("cookie-text").value });
+    // The page holds no copy of a credential longer than it must.
+    el("cookie-text").value = "";
+    renderCookies(state);
+    clearFail();
+  } catch (error) {
+    el("cookie-state").textContent = error.message;
+    el("cookie-state").classList.add("bad");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Save";
+  }
+});
+
+el("cookie-clear").addEventListener("click", async () => {
+  const response = await fetch("/api/cookies", { method: "DELETE" });
+  if (response.ok) renderCookies(await response.json());
 });

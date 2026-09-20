@@ -17,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from . import auth, cleanup, config, downloader, jobs, limits, urlguard
+from . import (auth, cleanup, config, cookiestore, downloader, jobs,
+               limits, urlguard)
 
 # uvicorn runs this application, and this is the logger it formats and
 # sends to its own output. A logger of our own would reach the journal
@@ -47,6 +48,10 @@ class JobRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class CookieRequest(BaseModel):
+    text: str
 
 
 def content_disposition(filename: str) -> str:
@@ -195,6 +200,28 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
         response = JSONResponse({"ok": True})
         response.delete_cookie(auth.COOKIE_NAME, path="/")
         return response
+
+    @app.get("/api/cookies")
+    def cookie_status() -> dict:
+        """Say what cookies the server holds, and never what they are."""
+        return cookiestore.status()
+
+    @app.put("/api/cookies")
+    def save_cookies(body: CookieRequest) -> dict:
+        try:
+            return cookiestore.save(body.text)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error))
+        except OSError:
+            raise HTTPException(
+                status_code=500,
+                detail="the server cannot write the cookie file. Check that "
+                       "the service user owns the folder it goes in.")
+
+    @app.delete("/api/cookies")
+    def clear_cookies() -> dict:
+        cookiestore.clear()
+        return cookiestore.status()
 
     @app.post("/api/probe")
     async def probe(request: ProbeRequest) -> dict:

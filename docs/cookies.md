@@ -12,9 +12,37 @@ site treats that traffic as a robot. Nothing in the URL and nothing in the
 application causes it.
 
 The answer is a cookie file. You sign in once in your own browser, export the
-cookies to a file, and name that file in the environment. The server then
-sends those cookies with every request, and the site treats it as your signed
-in browser.
+cookies to a file, and give the file to the server. The server then sends
+those cookies with every request, and the site treats it as your signed in
+browser.
+
+There are two ways to hand the file over. The page is the short one, and the
+one to use again when the session ends. The environment file is for a server
+that must come up with cookies already in place.
+
+## The short way: the Settings button
+
+1. Export the cookies, following section 1 below.
+2. Open the page and press **Settings**.
+3. Press **Choose file** and pick the file, or paste its text into the box.
+4. Press **Save**.
+
+The panel then says how many cookies it holds, which sites they are for, and
+when the first one expires. The next download uses them. Nothing restarts.
+
+Press **Choose file** rather than pasting when you can. A paste through some
+fields turns the tabs into spaces, and the format needs the tabs. The server
+says so when it happens, but the file button never has the problem.
+
+The page never shows the cookies again after you save them. It shows the
+count, the sites, and the dates, and no route sends the content back.
+**Remove** deletes the saved file.
+
+Who can save them is who can open the page. In public mode that is the
+password, like the rest of the page. In local mode there is no password, so
+anything on your own machine can replace the cookies, which is the reach
+that local mode gives to everything else as well. The file itself is written
+so that only the user running the server can read it.
 
 ## 1. Export the cookies
 
@@ -36,7 +64,11 @@ The file starts with this line:
 # Netscape HTTP Cookie File
 ```
 
-## 2. Put the file on the server
+## 2. Put the file on the server, the long way
+
+Skip this section if you used the Settings button. This route is for a
+server that must come up with cookies already working, before anybody opens
+the page.
 
 The file holds a live session of your account. Treat it like the password.
 
@@ -62,6 +94,14 @@ systemctl restart ytdlp-web
 
 The application refuses to start when the variable names a file that is
 absent or that the service user cannot read. It prints the reason.
+
+A file saved in the Settings panel wins over this one, because it is the
+newer of the two. **Remove** in the panel deletes the saved file, and the
+server falls back to this one.
+
+The panel writes its file beside the work folders. `YTDLP_WEB_COOKIE_STORE`
+moves it somewhere else. Wherever it sits, the service user must be able to
+write the folder, and the panel says so when it cannot.
 
 ## On your own machine
 
@@ -136,7 +176,8 @@ read-only path, which is where the systemd unit puts it.
 
 A session does not last forever. The site can end it, and then the robot
 message returns and the page says the cookies were refused. Export the file
-again from step 1 and replace it on the server.
+again from step 1 and save it again in the Settings panel. That is the whole
+repair, and it is why the panel exists.
 
 A file exported from an account you care about is a file worth protecting. A
 second account, used for nothing else, keeps the risk small.

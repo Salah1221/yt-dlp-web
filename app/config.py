@@ -16,6 +16,7 @@ CLEANUP_INTERVAL_SECONDS = 60
 TEMP_ROOT_ENV = "YTDLP_WEB_TEMP_ROOT"
 COOKIE_FILE_ENV = "YTDLP_WEB_COOKIES"
 COOKIE_BROWSER_ENV = "YTDLP_WEB_COOKIES_FROM_BROWSER"
+COOKIE_STORE_ENV = "YTDLP_WEB_COOKIE_STORE"
 PLAYER_CLIENT_ENV = "YTDLP_WEB_PLAYER_CLIENT"
 JS_RUNTIME_ENV = "YTDLP_WEB_JS_RUNTIMES"
 
@@ -25,9 +26,9 @@ JS_RUNTIME_ENV = "YTDLP_WEB_JS_RUNTIMES"
 # order it prefers them.
 JS_RUNTIMES = ("deno", "node", "quickjs", "bun")
 
-# downloader.cookie_opts writes one file with this prefix for each call
+# downloader.site_opts writes one file with this prefix for each call
 # into yt-dlp, and the janitor sweeps up one that a crash left behind.
-COOKIE_COPY_PREFIX = "cookies-"
+COOKIE_COPY_PREFIX = "cookie-copy-"
 
 
 def temp_root() -> Path:
@@ -105,13 +106,32 @@ def min_free_bytes() -> int:
     return limit * 3 if limit else 0
 
 
+def cookie_store() -> Path:
+    """Return the file that the settings panel of the page writes.
+
+    The operator can move it with YTDLP_WEB_COOKIE_STORE. The default
+    sits beside the work folders, which is the one path the systemd unit
+    lets the service write.
+    """
+    value = _text(COOKIE_STORE_ENV)
+    return Path(value).expanduser() if value else temp_root() / "cookies.txt"
+
+
 def cookie_file() -> Path | None:
     """Return the cookies.txt file to send to the site, or None.
 
     A site that asks the server to prove it is not a robot accepts the
-    request when it carries the cookies of a signed in browser. The
-    operator exports them once and names the file in the environment.
+    request when it carries the cookies of a signed in browser.
+
+    There are two ways in. Somebody pastes the cookies into the settings
+    panel of the page, which writes the store, or the operator places a
+    file and names it in the environment. The paste wins, because it is
+    the newer of the two and because it is how a person replaces a
+    session that the site has ended.
     """
+    store = cookie_store()
+    if store.is_file():
+        return store
     value = _text(COOKIE_FILE_ENV)
     return Path(value).expanduser() if value else None
 

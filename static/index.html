@@ -11,8 +11,36 @@
 <main>
   <header>
     <h1>yt-dlp web</h1>
-    <button id="logout" type="button" class="quiet hidden">Log out</button>
+    <div class="header-actions">
+      <button id="settings-toggle" type="button" class="quiet"
+              aria-expanded="false" aria-controls="settings">Settings</button>
+      <button id="logout" type="button" class="quiet hidden">Log out</button>
+    </div>
   </header>
+
+  <section id="settings" class="card hidden">
+    <h2>Cookies for the video site</h2>
+    <p class="note">
+      A site answers with <em>Sign in to confirm you're not a bot</em> when it
+      wants a signed in visitor. Export the cookies of a browser that is
+      signed in, in the Netscape format that an add-on calls
+      <code>cookies.txt</code>, and put them here. They stay on the server,
+      and this page never shows them again.
+    </p>
+    <p id="cookie-state" class="note">Reading the settings</p>
+    <div class="field">
+      <label for="cookie-text">Paste the file, or choose it</label>
+      <textarea id="cookie-text" rows="6" spellcheck="false"
+                autocomplete="off" autocapitalize="off"
+                placeholder="# Netscape HTTP Cookie File"></textarea>
+    </div>
+    <div class="settings-actions">
+      <label for="cookie-file" class="button">Choose file</label>
+      <input id="cookie-file" type="file" accept=".txt,text/plain" class="hidden">
+      <button id="cookie-save" type="button" class="primary">Save</button>
+      <button id="cookie-clear" type="button" class="quiet">Remove</button>
+    </div>
+  </section>
 
   <form id="probe-form">
     <input id="url" type="url" inputmode="url" placeholder="Paste a video URL"

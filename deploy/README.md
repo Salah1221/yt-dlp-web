@@ -307,7 +307,17 @@ Sign in to confirm you're not a bot
 
 The site wants a signed in visitor. It asks a server address more often than it asks a home connection, because many people share one server address.
 
-Export the cookies of a browser that is signed in, following `docs/cookies.md`, and copy the file to the server. The file holds a live session of that account, so root owns it and only the service reads it:
+The short route needs nothing on the server. Export the cookies of a browser that is signed in, following `docs/cookies.md`, then open the page, press **Settings**, choose the file, and press Save. The next download uses them, no restart, and the session that ends in a few weeks is replaced the same way.
+
+Set where that file lands, in `/etc/yt-dlp-web/ytdlp-web.env`:
+
+```
+YTDLP_WEB_COOKIE_STORE=/var/lib/ytdlp-web/cookies.txt
+```
+
+It has to sit inside `/var/lib/ytdlp-web`, because `ReadWritePaths` in the unit makes that the one path the service may write. The panel says so when it cannot write.
+
+The long route puts the file on the server by hand, for a machine that must come up with cookies already in place. It holds a live session of that account, so root owns it and only the service reads it:
 
 ```bash
 install -o root -g ytdlp -m 640 cookies.txt /etc/yt-dlp-web/cookies.txt
@@ -327,7 +337,9 @@ systemctl restart ytdlp-web
 
 The unit needs no change. The application copies the file for each download and never writes the one you placed, so the read-only `/etc` of the hardened unit is fine. The service refuses to start when the variable names a file that is absent or unreadable, and the log says which.
 
-A session does not last forever. When the message returns, export the file again and replace it.
+A file saved in the Settings panel wins over this one, and Remove in the panel falls back to it.
+
+A session does not last forever. When the message returns, export the file again and save it in the panel.
 
 ### Before you export anything
 
@@ -370,6 +382,7 @@ Which client answers changes from month to month, so a cookie file remains the s
 | A login attempt returns 429 | the nginx rate limit stopped it (5 per minute per address) | wait one minute, or raise the rate in the `limit_req_zone` line |
 | A download fails with "Sign in to confirm you're not a bot" | the site wants a signed in visitor, and it asks a server address more often than a home one | give the service a cookie file, as section 11 describes |
 | The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
+| The Settings panel says the server cannot write the file | `YTDLP_WEB_COOKIE_STORE` points outside `/var/lib/ytdlp-web`, which the unit forbids | put it inside that folder, then `systemctl restart ytdlp-web` |
 | The log warns about a JavaScript runtime | deno is not installed, so YouTube gives fewer formats | run `apt install -y nodejs` and set `YTDLP_WEB_JS_RUNTIMES=node` |
 
 ## Keeping it working

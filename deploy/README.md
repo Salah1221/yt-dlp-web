@@ -345,20 +345,30 @@ A session does not last forever. When the message returns, export the file again
 
 Two cheaper things change the same answer.
 
-yt-dlp answers the signature challenge of YouTube in JavaScript, and it looks for deno alone. Without a runtime YouTube gives fewer formats and asks for a sign in more often. The service writes a warning at startup when it finds none:
+yt-dlp answers the signature challenge of YouTube in JavaScript, and it looks for deno alone. Without a runtime it throws away every stream that carries a signature, which is most of them, and a download ends with `Requested format is not available`. The service writes a warning at startup when it has none:
 
 ```bash
 journalctl -u ytdlp-web -n 50 | grep -i javascript
 ```
 
-Install a runtime and name it, if the warning is there:
+Install deno if the warning is there:
 
 ```bash
-apt install -y nodejs
+apt install -y unzip
+curl -fsSL -o /tmp/deno.zip \
+  https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip
+unzip -o /tmp/deno.zip -d /usr/local/bin
+chmod 755 /usr/local/bin/deno
+deno --version
+systemctl restart ytdlp-web
 ```
 
+The service finds it there and needs no setting. `/usr/local/bin` stays readable under `ProtectSystem=strict`, and deno needs nothing it may not write.
+
+`apt install nodejs` is not the short route it looks like: yt-dlp needs node 22 or later and Debian 12 carries 18, which it refuses. The startup warning names the version that is installed and the version that is wanted, so it says when that is what happened. A node 22 of your own is named like this, in the environment file:
+
 ```
-YTDLP_WEB_JS_RUNTIMES=node
+YTDLP_WEB_JS_RUNTIMES=node:/opt/node22/bin/node
 ```
 
 The other is the client that yt-dlp asks for. YouTube applies the check differently to a television and to a browser:
@@ -383,8 +393,9 @@ Which client answers changes from month to month, so a cookie file remains the s
 | A download fails with "Sign in to confirm you're not a bot" | the site wants a signed in visitor, and it asks a server address more often than a home one | give the service a cookie file, as section 11 describes |
 | The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
 | The Settings panel says the server cannot write the file | `YTDLP_WEB_COOKIE_STORE` points outside `/var/lib/ytdlp-web`, which the unit forbids | put it inside that folder, then `systemctl restart ytdlp-web` |
-| The log warns about a JavaScript runtime | deno is not installed, so YouTube gives fewer formats | run `apt install -y nodejs` and set `YTDLP_WEB_JS_RUNTIMES=node` |
+| The log warns about a JavaScript runtime | no runtime is installed, or the node that is installed is older than 22 | install deno as section 11 shows, then `systemctl restart ytdlp-web` |
 | A download fails with "The page needs to be reloaded" | YouTube stopped serving one of the clients that yt-dlp asks for a signed in visitor, or the server has no JavaScript runtime | try again in a minute; if it stays, install a runtime as the row above says |
+| A download fails with "Requested format is not available" | no JavaScript runtime, so every stream carrying a signature was dropped | install deno as section 11 shows |
 
 ## Keeping it working
 

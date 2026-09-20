@@ -1,6 +1,7 @@
 """The settings that decide how the server presents itself to YouTube."""
 
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,11 +42,6 @@ def test_a_known_client_passes_the_check(monkeypatch):
     assert downloader.check_player_clients() is None
 
 
-def test_no_runtime_setting_leaves_the_yt_dlp_default(monkeypatch):
-    with downloader.site_opts() as opts:
-        assert "js_runtimes" not in opts
-
-
 def test_the_runtime_reaches_yt_dlp_with_its_path(monkeypatch):
     monkeypatch.setenv(config.JS_RUNTIME_ENV, "node:/usr/bin/node, bun")
     with downloader.site_opts() as opts:
@@ -76,32 +72,103 @@ def test_yt_dlp_accepts_the_runtime_setting(monkeypatch):
             assert ydl.params["js_runtimes"] == {"node": {}}
 
 
-def test_the_runtime_warning_names_a_runtime_that_is_there(monkeypatch, caplog):
-    monkeypatch.setattr(main.shutil, "which", lambda name: None)
-    monkeypatch.setattr(config, "js_runtime_on_path", lambda: "node")
-    main.warn_about_the_js_runtime()
-    assert config.JS_RUNTIME_ENV in caplog.text
-    assert "node" in caplog.text
+def fake_runtimes(monkeypatch, **installed):
+    """Say which runtimes are installed, and whether yt-dlp takes them.
+
+    Pass a version and a verdict per name: node=("20.20.2", False).
+    """
+    def info(name, path=None):
+        if name not in installed:
+            return None
+        version, supported = installed[name]
+        return SimpleNamespace(name=name, path=f"/usr/bin/{name}",
+                               version=version, supported=supported)
+
+    monkeypatch.setattr(downloader, "runtime_info", info)
+
+
+def test_a_runtime_that_is_installed_is_used_without_being_asked(monkeypatch):
+    # yt-dlp enables deno and nothing else, so a server with node and no
+    # deno would run YouTube with no runtime at all.
+    fake_runtimes(monkeypatch, node=("22.1.0", True))
+    assert downloader.js_runtime_auto() == {"node": {}}
+    with downloader.site_opts() as opts:
+        assert opts["js_runtimes"] == {"node": {}}
+
+
+def test_a_present_deno_is_left_to_yt_dlp(monkeypatch):
+    fake_runtimes(monkeypatch, deno=("2.5.6", True), node=("22.1.0", True))
+    assert downloader.js_runtime_auto() is None
+    with downloader.site_opts() as opts:
+        assert "js_runtimes" not in opts
+
+
+def test_a_node_that_is_too_old_is_not_used(monkeypatch):
+    # yt-dlp wants node 22, and a server carrying 20 has a node that
+    # counts for nothing. Enabling it would look like a fix and be none.
+    fake_runtimes(monkeypatch, node=("20.20.2", False))
+    assert downloader.js_runtime_auto() is None
+    assert downloader.js_runtime_ready() is False
+
+
+def test_the_trouble_names_both_versions(monkeypatch):
+    fake_runtimes(monkeypatch, node=("20.20.2", False))
+    trouble = downloader.js_runtime_trouble()
+    assert "20.20.2" in trouble
+    assert "22" in trouble
+
+
+def test_a_runtime_after_the_old_one_is_still_taken(monkeypatch):
+    fake_runtimes(monkeypatch, node=("20.20.2", False), bun=("1.3.11", True))
+    assert downloader.js_runtime_auto() == {"bun": {}}
+    assert downloader.js_runtime_ready() is True
+
+
+def test_what_the_operator_asked_for_wins(monkeypatch):
+    monkeypatch.setenv(config.JS_RUNTIME_ENV, "bun")
+    fake_runtimes(monkeypatch, deno=("2.5.6", True), bun=("1.3.11", True))
+    with downloader.site_opts() as opts:
+        assert opts["js_runtimes"] == {"bun": {}}
+
+
+def test_no_runtime_anywhere_is_not_ready(monkeypatch):
+    fake_runtimes(monkeypatch)
+    assert downloader.js_runtime_ready() is False
+    assert downloader.js_runtime_trouble() == "no JavaScript runtime is installed"
+
+
+def test_a_named_runtime_that_is_absent_is_not_ready(monkeypatch):
+    monkeypatch.setenv(config.JS_RUNTIME_ENV, "deno")
+    fake_runtimes(monkeypatch, node=("22.1.0", True))
+    assert downloader.js_runtime_ready() is False
 
 
 def test_the_runtime_warning_tells_you_to_install_one(monkeypatch, caplog):
-    monkeypatch.setattr(main.shutil, "which", lambda name: None)
-    monkeypatch.setattr(config, "js_runtime_on_path", lambda: None)
+    fake_runtimes(monkeypatch)
     main.warn_about_the_js_runtime()
-    assert "Install deno" in caplog.text
+    assert config.JS_RUNTIME_ENV in caplog.text
+    assert "no JavaScript runtime is installed" in caplog.text
+
+
+def test_the_warning_names_a_runtime_that_is_too_old(monkeypatch, caplog):
+    fake_runtimes(monkeypatch, node=("20.20.2", False))
+    main.warn_about_the_js_runtime()
+    assert "20.20.2" in caplog.text
 
 
 def test_a_present_deno_raises_no_warning(monkeypatch, caplog):
-    monkeypatch.setattr(main.shutil, "which", lambda name: "/usr/bin/deno")
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
     main.warn_about_the_js_runtime()
     assert caplog.text == ""
 
 
-def test_a_named_runtime_raises_no_warning(monkeypatch, caplog):
-    monkeypatch.setenv(config.JS_RUNTIME_ENV, "node")
-    monkeypatch.setattr(main.shutil, "which", lambda name: None)
+def test_the_runtime_it_found_by_itself_is_named_in_the_log(monkeypatch, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    fake_runtimes(monkeypatch, node=("22.1.0", True))
     main.warn_about_the_js_runtime()
-    assert caplog.text == ""
+    assert "node" in caplog.text
 
 
 def test_the_reload_error_asks_the_rest_of_the_clients():
@@ -133,12 +200,50 @@ def test_every_other_error_gets_no_retry():
     assert downloader.retry_opts(DownloadError("HTTP Error 404")) is None
 
 
-def test_the_reload_message_names_what_to_check():
+def test_the_reload_message_says_to_try_again_when_a_runtime_is_there(
+        monkeypatch):
     from yt_dlp.utils import DownloadError
 
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
     message = downloader.explain(DownloadError("The page needs to be reloaded."))
     assert "try again" in message
+
+
+def test_the_reload_message_names_the_runtime_when_there_is_none(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch)
+    message = downloader.explain(DownloadError("The page needs to be reloaded."))
     assert config.JS_RUNTIME_ENV in message
+
+
+def test_the_format_message_names_the_runtime_when_there_is_none(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch)
+    message = downloader.explain(
+        DownloadError("ERROR: Requested format is not available. "
+                      "Use --list-formats for a list of available formats"))
+    assert config.JS_RUNTIME_ENV in message
+    assert "--list-formats" not in message
+
+
+def test_the_format_message_sends_a_chosen_format_back_to_check(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    message = downloader.explain(
+        DownloadError("Requested format is not available"), "format")
+    assert "Press Check again" in message
+
+
+def test_the_format_message_for_the_buttons_says_to_try_again(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    message = downloader.explain(
+        DownloadError("Requested format is not available"), "video")
+    assert "Try again" in message
 
 
 def test_probe_asks_a_second_time_and_reports_the_second_answer(monkeypatch):
@@ -183,6 +288,8 @@ def test_a_job_asks_a_second_time_as_well(monkeypatch, tmp_path):
 
 def test_a_second_refusal_is_reported_in_words(monkeypatch):
     from yt_dlp.utils import DownloadError
+
+    fake_runtimes(monkeypatch)
 
     def fake(opts, url, download):
         raise DownloadError("The page needs to be reloaded.")

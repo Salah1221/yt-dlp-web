@@ -127,6 +127,33 @@ they run, and a locked database gives an error in place of a download.
 This route needs a browser profile on the machine that runs the server, so it
 does not work on a server.
 
+## "The page needs to be reloaded"
+
+This one arrives after the cookies are in place, and it is the same gate
+wearing another coat:
+
+```
+ERROR: [youtube] kzWg5jVuHUI: The page needs to be reloaded.
+```
+
+yt-dlp asks a different set of YouTube clients as soon as cookies are in
+play, and YouTube has stopped serving one of that set. The application
+notices this message and asks the rest of the set once more by itself, so
+most of the time you never see it.
+
+When you do see it, two things cause it.
+
+It comes and goes on the YouTube side, so the first thing to do is to try
+again in a minute.
+
+If it stays, the server has no JavaScript runtime. YouTube now needs one,
+and without it every client answers this way. The section below says how to
+give the server one, and the startup log says whether it has one.
+
+Naming the clients yourself with `YTDLP_WEB_PLAYER_CLIENT` turns the second
+attempt off, because a named list is a choice and the application does not
+argue with it.
+
 ## Without a cookie file
 
 Three things change the answer, and none of them always works.
@@ -173,11 +200,21 @@ keep working, so try the three above first.
 
 ## What the application does with the file
 
-Each call into yt-dlp gets its own copy of the file, and the copy is deleted
-when the call ends. yt-dlp writes the cookie jar back when it closes, so
-without the copy two downloads at once would write over each other, and the
-file you placed would change under you. The copy also lets the file live on a
-read-only path, which is where the systemd unit puts it.
+Each call into yt-dlp gets its own copy of the file. yt-dlp writes the cookie
+jar back when it closes, so without the copy two downloads at once would
+write over each other. The copy also lets the file live on a read-only path,
+which is where the systemd unit puts it.
+
+The copy is not thrown away unread. A site hands out a fresh value for a
+cookie as it is used, and the old value stops working soon after, so what
+yt-dlp wrote goes back into the file that the Settings panel saved. Without
+that, a saved file would age out in days and the messages above would come
+back. The panel still shows the day you saved it, because a download is not
+a save.
+
+A file that the operator placed and named in `YTDLP_WEB_COOKIES` is never
+written back, because it can be owned by root on a read-only path. Such a
+file ages, which is one more reason to prefer the panel.
 
 ## When it stops working
 

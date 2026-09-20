@@ -14,6 +14,7 @@ import datetime as dt
 import io
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from yt_dlp.cookies import YoutubeDLCookieJar
@@ -30,6 +31,10 @@ MAX_BYTES = 256 * 1024
 
 # The page shows this many domains and then says how many are left.
 SHOWN_DOMAINS = 6
+
+# Two downloads can end at the same moment, and both may carry cookies
+# that the site rotated. One writes the store at a time.
+_write_lock = threading.Lock()
 
 
 def _jar(path: Path) -> YoutubeDLCookieJar:
@@ -91,6 +96,58 @@ def _describe(jar: YoutubeDLCookieJar, path: Path) -> dict:
         "expires": soonest,
         "saved": saved,
     }
+
+
+def _values(jar: YoutubeDLCookieJar) -> set:
+    """Return what a jar holds, so two of them can be compared."""
+    return {(cookie.domain, cookie.path, cookie.name, cookie.value,
+             cookie.expires) for cookie in jar}
+
+
+def _place(body: str, store: Path) -> None:
+    """Put this text at the store path, readable by nobody else."""
+    handle, name = tempfile.mkstemp(prefix=".cookies-", dir=store.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(body)
+        os.chmod(staged, 0o600)
+        os.replace(staged, store)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def refresh(copy: Path, stamp: float) -> bool:
+    """Take back the cookies that the site rotated during a download.
+
+    A site hands out a fresh value for a cookie as it is used, and the
+    old value stops working soon after. yt-dlp writes the new jar to the
+    file it was given, which is a copy of the store, so without this the
+    refreshed cookies would go with the copy and the saved ones would
+    age out in a few days.
+
+    `stamp` is the time the store carried when the copy was taken. A
+    store that changed since then belongs to a download that ended
+    later, and the newer one stands.
+    """
+    with _write_lock:
+        store = config.cookie_store()
+        try:
+            if not store.is_file() or store.stat().st_mtime != stamp:
+                return False
+            if _values(_jar(store)) == _values(_jar(copy)):
+                return False
+            _place(copy.read_text(encoding="utf-8"), store)
+        except OSError:
+            # A refresh that fails must never fail the download. The
+            # cookies that were saved keep working until they expire.
+            return False
+        except Exception:
+            return False
+    # The write above changed the time, so the panel would otherwise say
+    # that somebody saved the cookies during a download.
+    os.utime(store, (stamp, stamp))
+    return True
 
 
 def status() -> dict:

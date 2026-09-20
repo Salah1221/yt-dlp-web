@@ -1,5 +1,7 @@
 """The settings that decide how the server presents itself to YouTube."""
 
+import pathlib
+
 import pytest
 
 from app import config, downloader, main
@@ -100,3 +102,91 @@ def test_a_named_runtime_raises_no_warning(monkeypatch, caplog):
     monkeypatch.setattr(main.shutil, "which", lambda name: None)
     main.warn_about_the_js_runtime()
     assert caplog.text == ""
+
+
+def test_the_reload_error_asks_the_rest_of_the_clients():
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError("ERROR: [youtube] kzWg5jVuHUI: "
+                          "The page needs to be reloaded.")
+    assert downloader.retry_opts(error) == {"extractor_args": {
+        "youtube": {"player_client": ["default", "-tv_downgraded"]}}}
+
+
+def test_the_client_yt_dlp_refuses_is_one_it_knows():
+    # The retry drops this by name. A yt-dlp that renames it would make
+    # the retry a no-op, and this says so before a user finds out.
+    assert downloader.REFUSED_CLIENT in downloader.known_player_clients()
+
+
+def test_a_chosen_client_list_is_left_alone(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    monkeypatch.setenv(config.PLAYER_CLIENT_ENV, "tv")
+    error = DownloadError("The page needs to be reloaded.")
+    assert downloader.retry_opts(error) is None
+
+
+def test_every_other_error_gets_no_retry():
+    from yt_dlp.utils import DownloadError
+
+    assert downloader.retry_opts(DownloadError("HTTP Error 404")) is None
+
+
+def test_the_reload_message_names_what_to_check():
+    from yt_dlp.utils import DownloadError
+
+    message = downloader.explain(DownloadError("The page needs to be reloaded."))
+    assert "try again" in message
+    assert config.JS_RUNTIME_ENV in message
+
+
+def test_probe_asks_a_second_time_and_reports_the_second_answer(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    seen = []
+
+    def fake(opts, url, download):
+        seen.append(opts.get("extractor_args"))
+        if len(seen) == 1:
+            raise DownloadError("The page needs to be reloaded.")
+        return {"title": "it worked the second time", "formats": []}
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    assert downloader.probe("https://example.com/x")["title"] == \
+        "it worked the second time"
+    assert seen[0] is None
+    assert seen[1]["youtube"]["player_client"] == ["default", "-tv_downgraded"]
+
+
+def test_a_job_asks_a_second_time_as_well(monkeypatch, tmp_path):
+    from yt_dlp.utils import DownloadError
+
+    from app import jobs
+
+    seen = []
+
+    def fake(opts, url, download):
+        seen.append(opts.get("extractor_args"))
+        if len(seen) == 1:
+            raise DownloadError("The page needs to be reloaded.")
+        (pathlib.Path(opts["paths"]["home"]) / "clip.mp4").write_bytes(b"x" * 10)
+        return {"title": "second time"}
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    store = jobs.JobStore(tmp_path, ttl_seconds=600)
+    job = store.create("https://example.com/x", "video")
+    downloader.run(job, store)
+    assert store.get(job.id).state == jobs.READY
+    assert len(seen) == 2
+
+
+def test_a_second_refusal_is_reported_in_words(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    def fake(opts, url, download):
+        raise DownloadError("The page needs to be reloaded.")
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    with pytest.raises(ValueError, match="JavaScript runtime"):
+        downloader.probe("https://example.com/x")

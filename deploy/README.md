@@ -384,6 +384,7 @@ Which client answers changes from month to month, so a cookie file remains the s
 | The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
 | The Settings panel says the server cannot write the file | `YTDLP_WEB_COOKIE_STORE` points outside `/var/lib/ytdlp-web`, which the unit forbids | put it inside that folder, then `systemctl restart ytdlp-web` |
 | The log warns about a JavaScript runtime | deno is not installed, so YouTube gives fewer formats | run `apt install -y nodejs` and set `YTDLP_WEB_JS_RUNTIMES=node` |
+| A download fails with "The page needs to be reloaded" | YouTube stopped serving one of the clients that yt-dlp asks for a signed in visitor, or the server has no JavaScript runtime | try again in a minute; if it stays, install a runtime as the row above says |
 
 ## Keeping it working
 

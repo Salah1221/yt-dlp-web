@@ -8,9 +8,40 @@ import pytest
 from app import config, downloader, main
 
 
-def test_no_setting_asks_for_no_client():
+def test_the_clients_that_need_no_token_are_asked():
+    # YouTube drops the streams of a client that wants a PO token, and a
+    # server has no way to get one, so those clients leave nothing.
     with downloader.site_opts() as opts:
-        assert "extractor_args" not in opts
+        asked = opts["extractor_args"]["youtube"]["player_client"]
+    assert asked
+    assert "web" not in asked
+    assert "tv" in asked
+
+
+def test_every_client_asked_by_default_needs_no_token():
+    from yt_dlp.extractor.youtube._base import (INNERTUBE_CLIENTS,
+                                                StreamingProtocol)
+
+    protocols = (StreamingProtocol.HTTPS, StreamingProtocol.DASH,
+                 StreamingProtocol.HLS)
+    for name in downloader.token_free_clients():
+        policies = INNERTUBE_CLIENTS[name].get("GVS_PO_TOKEN_POLICY") or {}
+        for protocol in protocols:
+            policy = policies.get(protocol)
+            assert not (policy and policy.required), name
+
+
+def test_a_client_that_wants_a_token_is_left_out():
+    # web is the one yt-dlp reaches for first and the one that asks.
+    assert "web" not in downloader.token_free_clients()
+
+
+def test_the_operator_can_hand_the_choice_back_to_yt_dlp(monkeypatch):
+    # For a server that has a plugin minting the token, where every
+    # client is open again.
+    monkeypatch.setenv(config.PLAYER_CLIENT_ENV, "default")
+    with downloader.site_opts() as opts:
+        assert opts["extractor_args"]["youtube"]["player_client"] == ["default"]
 
 
 def test_the_client_list_reaches_yt_dlp(monkeypatch):
@@ -260,8 +291,11 @@ def test_probe_asks_a_second_time_and_reports_the_second_answer(monkeypatch):
     monkeypatch.setattr(downloader, "_extract", fake)
     assert downloader.probe("https://example.com/x")["title"] == \
         "it worked the second time"
-    assert seen[0] is None
-    assert seen[1]["youtube"]["player_client"] == ["default", "-tv_downgraded"]
+    # The refused client goes, and the rest of what was asked stays.
+    assert downloader.REFUSED_CLIENT in seen[0]["youtube"]["player_client"]
+    asked = seen[1]["youtube"]["player_client"]
+    assert downloader.REFUSED_CLIENT not in asked
+    assert asked
 
 
 def test_a_job_asks_a_second_time_as_well(monkeypatch, tmp_path):
@@ -423,3 +457,52 @@ def test_a_cancelled_job_is_never_retried(monkeypatch, tmp_path):
     downloader.run(job, store)
     assert len(calls) == 1
     assert store.get(job.id) is None
+
+
+def test_the_reload_retry_keeps_the_other_clients(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError("The page needs to be reloaded.")
+    opts = {"extractor_args": {"youtube": {
+        "player_client": ["tv", "tv_downgraded", "web_embedded"]}}}
+    assert downloader.retry_opts(error, opts) == {"extractor_args": {
+        "youtube": {"player_client": ["tv", "web_embedded"]}}}
+
+
+def test_the_reload_retry_stops_when_there_is_nothing_to_drop(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    error = DownloadError("The page needs to be reloaded.")
+    opts = {"extractor_args": {"youtube": {"player_client": ["tv"]}}}
+    assert downloader.retry_opts(error, opts) is None
+
+
+def test_each_attempt_keeps_its_own_notes(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    from app import cookiestore, jobs
+
+    fake_runtimes(monkeypatch, deno=("2.5.6", True))
+    seen = []
+
+    def fake(opts, url, download):
+        seen.append(opts.get("cookiefile"))
+        if len(seen) == 1:
+            # The first attempt meets the token gate.
+            opts["logger"].debug("web client https formats require a GVS PO "
+                                 "Token which was not provided")
+        else:
+            opts["logger"].warning("YouTube is forcing SABR streaming for "
+                                   "this client")
+        raise DownloadError(FORMAT_ERROR)
+
+    monkeypatch.setattr(downloader, "_extract", fake)
+    monkeypatch.setattr(downloader, "retry_opts",
+                        lambda error, opts: {"cookiefile": None,
+                                             "cookiesfrombrowser": None})
+    with pytest.raises(downloader.Refused) as caught:
+        downloader.probe("https://example.com/x")
+    # The message names what stopped the attempt that failed last, not
+    # what the first one met on the way.
+    assert "streaming protocol" in str(caught.value)
+    assert "token" not in str(caught.value)

@@ -124,9 +124,10 @@ def site_opts() -> Iterator[dict]:
     runtimes = config.js_runtimes() or js_runtime_auto()
     if runtimes:
         opts["js_runtimes"] = runtimes
-    clients = config.player_clients()
+    # The operator's choice, or the clients that a server can use at all.
+    clients = config.player_clients() or list(default_clients())
     if clients:
-        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        opts["extractor_args"] = {"youtube": {"player_client": list(clients)}}
     browser = config.cookies_from_browser()
     if browser:
         opts["cookiesfrombrowser"] = browser
@@ -239,6 +240,53 @@ def js_runtime_trouble() -> str | None:
     return "no JavaScript runtime is installed"
 
 
+@functools.cache
+def token_free_clients() -> tuple[str, ...]:
+    """Return the YouTube clients whose streams need no PO token.
+
+    YouTube hands that token to a browser and not to a server, and
+    yt-dlp drops every stream of a client that wants one, which is how
+    a page ends up with nothing on it to download. The clients that
+    want none are the ones a server can use.
+
+    yt-dlp keeps the policy per client, so this reads it there rather
+    than naming clients here. A client that changes side is followed
+    without a change to this file, and a yt-dlp that moves the table
+    gives an empty answer, which leaves its own choice in place.
+    """
+    try:
+        from yt_dlp.extractor.youtube._base import (INNERTUBE_CLIENTS,
+                                                    StreamingProtocol)
+    except Exception:  # pragma: no cover - only on a changed yt-dlp
+        return ()
+    protocols = (StreamingProtocol.HTTPS, StreamingProtocol.DASH,
+                 StreamingProtocol.HLS)
+    free = []
+    for name, client in INNERTUBE_CLIENTS.items():
+        if name.startswith("_"):
+            continue
+        policies = client.get("GVS_PO_TOKEN_POLICY") or {}
+        if any((policies.get(protocol) or None) and policies[protocol].required
+               for protocol in protocols):
+            continue
+        free.append((client.get("priority", 0), name))
+    # yt-dlp prefers a client with a higher priority, and so does this.
+    return tuple(name for _, name in sorted(free, key=lambda pair: -pair[0]))
+
+
+def default_clients() -> tuple[str, ...]:
+    """Return the clients to ask when the operator named none.
+
+    Only the ones that need no token. A plugin can mint the token and
+    open the rest, but whether a plugin that is installed can actually
+    reach its server is not a thing this can ask cheaply, and guessing
+    it wrong puts the server back on clients that serve it nothing. An
+    operator who has one working says so with YTDLP_WEB_PLAYER_CLIENT,
+    where `default` hands the choice back to yt-dlp.
+    """
+    return token_free_clients()
+
+
 def known_player_clients() -> tuple[str, ...]:
     """Return the client names that this yt-dlp knows, or nothing.
 
@@ -314,6 +362,12 @@ def _matches(error: Exception, marks: tuple[str, ...]) -> bool:
     return all(mark in lowered for mark in marks)
 
 
+def _asked_clients(opts: dict) -> list[str]:
+    """Return the YouTube clients that a set of options asks for."""
+    youtube = (opts.get("extractor_args") or {}).get("youtube") or {}
+    return list(youtube.get("player_client") or [])
+
+
 def retry_opts(error: Exception, opts: dict) -> dict | None:
     """Return the changes for a second attempt, or None for no second try.
 
@@ -332,8 +386,13 @@ def retry_opts(error: Exception, opts: dict) -> dict | None:
     fails again, and the message says so.
     """
     if _matches(error, RELOAD_MARKS) and not config.player_clients():
-        return {"extractor_args": {
-            "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+        asked = _asked_clients(opts)
+        if not asked:
+            return {"extractor_args": {
+                "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+        left = [name for name in asked if name != REFUSED_CLIENT]
+        return ({"extractor_args": {"youtube": {"player_client": left}}}
+                if left and left != asked else None)
     if _matches(error, FORMAT_MARKS) and (opts.get("cookiefile")
                                           or opts.get("cookiesfrombrowser")):
         return {"cookiefile": None, "cookiesfrombrowser": None}
@@ -370,12 +429,11 @@ def explain(error: Exception, mode: str | None = None,
                     "carries a signature, which is most of them. "
                     f"{runtime_advice()}")
         if notes is not None and notes.mentions("po token"):
-            return ("YouTube is holding this video behind a token that it "
-                    "hands to a browser and not to a server. It asks a "
-                    "signed in visitor for one far more often than anybody "
-                    "else, so the cookies are worth taking out in Settings. "
-                    "A plugin can mint the token instead, and "
-                    "docs/cookies.md names it.")
+            return ("YouTube wants a token for this video that it hands to "
+                    "a browser and not to a server, and it wants one from "
+                    "every client that can serve it. The clients that need "
+                    "no token were asked first and had nothing. A plugin "
+                    "mints the token, and docs/cookies.md installs it.")
         if notes is not None and notes.mentions("sabr"):
             return ("YouTube is serving this video only through its own "
                     "streaming protocol, which yt-dlp cannot take. Taking "
@@ -419,9 +477,7 @@ def attempt(opts: dict, url: str, download: bool, allow_private: bool,
     The warnings go to the notes and nowhere else, so nothing of them
     reaches the console.
     """
-    notes = Notes()
-
-    def ask(extra: dict | None = None):
+    def ask(extra: dict | None, notes: Notes):
         with urlguard.guarded(allow_private=allow_private):
             return _extract({**opts, "no_warnings": False, "logger": notes,
                              # The reason a client's formats were dropped is
@@ -430,20 +486,24 @@ def attempt(opts: dict, url: str, download: bool, allow_private: bool,
                              "verbose": True, **(extra or {})},
                             url, download)
 
+    first = Notes()
     try:
-        return ask()
+        return ask(None, first)
     except jobs.JobCancelled:
         raise
     except Exception as error:  # yt-dlp raises many types
         retry = retry_opts(error, opts)
         if retry is None:
-            _refuse(error, mode, notes)
+            _refuse(error, mode, first)
+        # The second attempt keeps its own notes, so the message names
+        # what stopped that attempt and not what the first one met.
+        second = Notes()
         try:
-            return ask(retry)
+            return ask(retry, second)
         except jobs.JobCancelled:
             raise
         except Exception as again:
-            _refuse(again, mode, notes)
+            _refuse(again, mode, second)
 
 
 def _refuse(error: Exception, mode: str | None,

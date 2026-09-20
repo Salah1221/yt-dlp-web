@@ -371,13 +371,7 @@ The service finds it there and needs no setting. `/usr/local/bin` stays readable
 YTDLP_WEB_JS_RUNTIMES=node:/opt/node22/bin/node
 ```
 
-The other is the client that yt-dlp asks for. YouTube applies the check differently to a television and to a browser:
-
-```
-YTDLP_WEB_PLAYER_CLIENT=tv,web_safari
-```
-
-Which client answers changes from month to month, so a cookie file remains the steady answer. `docs/cookies.md` describes both in full.
+The other is the client that yt-dlp asks for, and the application already handles it: YouTube wants a proof token from its favourite clients and gives it to browsers only, so the application asks for the clients that want none. Nothing to set. `YTDLP_WEB_PLAYER_CLIENT` overrides that list, and `default` hands the choice back to yt-dlp, which is what a server with a token plugin wants. `docs/cookies.md` describes all of it.
 
 ## Troubleshooting
 
@@ -396,7 +390,7 @@ Which client answers changes from month to month, so a cookie file remains the s
 | The log warns about a JavaScript runtime | no runtime is installed, or the node that is installed is older than 22 | install deno as section 11 shows, then `systemctl restart ytdlp-web` |
 | A download fails with "The page needs to be reloaded" | YouTube stopped serving one of the clients that yt-dlp asks for a signed in visitor, or the server has no JavaScript runtime | try again in a minute; if it stays, install a runtime as the row above says |
 | A download fails with "Requested format is not available" | no JavaScript runtime, so every stream carrying a signature was dropped | install deno as section 11 shows |
-| It still fails once deno is in place | YouTube wants a token it gives a browser and not a server, which it asks a signed in visitor for far more often | take the cookies out in the Settings panel and try again |
+| It still fails once deno is in place | YouTube wants a proof token for this video from every client that can serve it | the page says so; `docs/cookies.md` installs the plugin that mints it |
 
 ## Keeping it working
 

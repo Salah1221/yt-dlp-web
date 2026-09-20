@@ -368,34 +368,39 @@ def _asked_clients(opts: dict) -> list[str]:
     return list(youtube.get("player_client") or [])
 
 
-def retry_opts(error: Exception, opts: dict) -> dict | None:
-    """Return the changes for a second attempt, or None for no second try.
+def next_fallback(error: Exception, opts: dict,
+                  spent: tuple[str, ...]) -> tuple[str, dict] | None:
+    """Return the next thing to try after a failure, or None to stop.
 
-    Two failures are worth asking again about, and each is asked in the
-    way that answers it.
+    Both of the failures that YouTube answers a server with mean the
+    same thing underneath: the clients that were asked served nothing.
+    So both walk the same short ladder, and each rung is taken once.
 
-    YouTube refuses one of the clients that yt-dlp picks for a signed in
-    visitor, and the refusal comes and goes. The rest of that set is
-    asked instead. An operator who named the clients has said what to
-    ask, so their choice stands and nothing is changed.
+    The refused client goes first, because dropping it costs nothing
+    and keeps the sign in.
 
-    And YouTube holds the streams of a signed in visitor behind a token
-    that it hands to a browser and not to a server, which leaves nothing
-    to download. Signing in is what moved yt-dlp onto those clients, so
-    the second attempt asks as nobody. A video that needs the sign in
-    fails again, and the message says so.
+    The cookies go second. Signing in is what moves yt-dlp onto the
+    clients YouTube treats worst, so asking as nobody reaches the ones
+    that still answer. A video that needs the sign in fails again after
+    this, and the message says which way it was tried.
+
+    An operator who named the clients has said what to ask, so the
+    first rung is theirs to keep and only the second is taken.
     """
-    if _matches(error, RELOAD_MARKS) and not config.player_clients():
+    if not (_matches(error, RELOAD_MARKS) or _matches(error, FORMAT_MARKS)):
+        return None
+    if "clients" not in spent and not config.player_clients():
         asked = _asked_clients(opts)
         if not asked:
-            return {"extractor_args": {
-                "youtube": {"player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
+            return "clients", {"extractor_args": {"youtube": {
+                "player_client": ["default", f"-{REFUSED_CLIENT}"]}}}
         left = [name for name in asked if name != REFUSED_CLIENT]
-        return ({"extractor_args": {"youtube": {"player_client": left}}}
-                if left and left != asked else None)
-    if _matches(error, FORMAT_MARKS) and (opts.get("cookiefile")
-                                          or opts.get("cookiesfrombrowser")):
-        return {"cookiefile": None, "cookiesfrombrowser": None}
+        if left and left != asked:
+            return "clients", {"extractor_args": {
+                "youtube": {"player_client": left}}}
+    if "cookies" not in spent and (opts.get("cookiefile")
+                                   or opts.get("cookiesfrombrowser")):
+        return "cookies", {"cookiefile": None, "cookiesfrombrowser": None}
     return None
 
 
@@ -407,7 +412,8 @@ def runtime_advice() -> str:
 
 
 def explain(error: Exception, mode: str | None = None,
-            notes: Notes | None = None) -> str:
+            notes: Notes | None = None,
+            spent: tuple[str, ...] = ()) -> str:
     """Return the message for the page, in place of the yt-dlp one.
 
     A person can act on these failures, and the yt-dlp text tells them
@@ -419,9 +425,13 @@ def explain(error: Exception, mode: str | None = None,
         if not js_runtime_ready():
             return ("YouTube refused every client it was asked, and "
                     f"{runtime_advice()}")
-        return ("YouTube refused the client that yt-dlp asks for a signed in "
-                "visitor, and it refused the rest of them as well. This one "
-                "comes and goes, so try again in a minute.")
+        both = ("with the cookies and without them, " if "cookies" in spent
+                else "")
+        return (f"YouTube refused every client it was asked, {both}so there "
+                "is nothing this server can read the video from. This one "
+                "comes and goes on the YouTube side, so try again in a "
+                "minute. If it stays, the video is one YouTube is serving "
+                "to browsers only.")
     if _matches(error, FORMAT_MARKS):
         if not js_runtime_ready():
             return ("YouTube served nothing that this server can download. "
@@ -445,10 +455,12 @@ def explain(error: Exception, mode: str | None = None,
                     "to each of the clients it answers. Press Check again "
                     "and take the format from the new list, or use the "
                     "Video MP4 button, which takes what is there.")
-        return ("YouTube served nothing that this server can download, "
-                "with the cookies and without them. It does this to some "
-                "videos and some visitors at a time, and it passes, so try "
-                "again in a minute.")
+        both = ("with the cookies and without them, " if "cookies" in spent
+                else "")
+        return (f"YouTube served nothing this server can download, {both}so "
+                "there is nothing to take. It does this to some videos and "
+                "some visitors at a time, and it passes, so try again in a "
+                "minute.")
     if not _matches(error, BOT_CHECK_MARKS):
         return text
     if config.cookie_file() or config.cookies_from_browser():
@@ -477,39 +489,38 @@ def attempt(opts: dict, url: str, download: bool, allow_private: bool,
     The warnings go to the notes and nowhere else, so nothing of them
     reaches the console.
     """
-    def ask(extra: dict | None, notes: Notes):
+    def ask(current: dict, notes: Notes):
         with urlguard.guarded(allow_private=allow_private):
-            return _extract({**opts, "no_warnings": False, "logger": notes,
+            return _extract({**current, "no_warnings": False, "logger": notes,
                              # The reason a client's formats were dropped is
                              # a debug line for the clients yt-dlp asks by
                              # default, so the notes only see it this way.
-                             "verbose": True, **(extra or {})},
-                            url, download)
+                             "verbose": True}, url, download)
 
-    first = Notes()
-    try:
-        return ask(None, first)
-    except jobs.JobCancelled:
-        raise
-    except Exception as error:  # yt-dlp raises many types
-        retry = retry_opts(error, opts)
-        if retry is None:
-            _refuse(error, mode, first)
-        # The second attempt keeps its own notes, so the message names
-        # what stopped that attempt and not what the first one met.
-        second = Notes()
+    current = dict(opts)
+    spent: tuple[str, ...] = ()
+    while True:
+        # Each attempt keeps its own notes, so the message names what
+        # stopped the attempt that failed last, not what an earlier one
+        # met on the way.
+        notes = Notes()
         try:
-            return ask(retry, second)
+            return ask(current, notes)
         except jobs.JobCancelled:
             raise
-        except Exception as again:
-            _refuse(again, mode, second)
+        except Exception as error:  # yt-dlp raises many types
+            step = next_fallback(error, current, spent)
+            if step is None:
+                _refuse(error, mode, notes, spent)
+            name, changes = step
+            spent += (name,)
+            current = {**current, **changes}
 
 
-def _refuse(error: Exception, mode: str | None,
-            notes: Notes | None = None) -> None:
+def _refuse(error: Exception, mode: str | None, notes: Notes | None = None,
+            spent: tuple[str, ...] = ()) -> None:
     """Raise the failure with the message for the page, or as it came."""
-    message = explain(error, mode, notes)
+    message = explain(error, mode, notes, spent)
     if message == str(error):
         raise error
     raise Refused(message) from error

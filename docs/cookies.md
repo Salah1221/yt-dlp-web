@@ -129,30 +129,30 @@ does not work on a server.
 
 ## "The page needs to be reloaded"
 
-This one arrives after the cookies are in place, and it is the same gate
-wearing another coat:
-
 ```
 ERROR: [youtube] kzWg5jVuHUI: The page needs to be reloaded.
 ```
 
-yt-dlp asks a different set of YouTube clients as soon as cookies are in
-play, and YouTube has stopped serving one of that set. The application
-notices this message and asks the rest of the set once more by itself, so
-most of the time you never see it.
+YouTube says this when it has stopped serving the client that asked. It is
+the same wall as the message below, wearing another coat: nothing that was
+asked would serve the video.
 
-When you do see it, two things cause it.
+The application walks a short ladder before it says anything, and each rung
+is taken once.
+
+1. It drops the client that YouTube is refusing and asks the rest. This costs
+   nothing and keeps the sign in.
+2. It asks again as nobody, with the cookies left off. Signing in is what
+   moves yt-dlp onto the clients YouTube treats worst, so this reaches the
+   ones that still answer.
+
+Most of the time one of those goes through and you see nothing. When the
+message does arrive it says whether the cookies were tried both ways, so you
+know the ladder was walked.
 
 It comes and goes on the YouTube side, so the first thing to do is to try
-again in a minute.
-
-If it stays, the server has no JavaScript runtime. YouTube now needs one,
-and without it every client answers this way. The section below says how to
-give the server one, and the startup log says whether it has one.
-
-Naming the clients yourself with `YTDLP_WEB_PLAYER_CLIENT` turns the second
-attempt off, because a named list is a choice and the application does not
-argue with it.
+again in a minute. A video that stays is one YouTube is serving to browsers
+only, and the section below ends with the plugin for that.
 
 ## "Requested format is not available"
 

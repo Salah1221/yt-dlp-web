@@ -27,10 +27,9 @@ that must come up with cookies already in place.
 3. Press **Choose file** and pick the file, or paste its text into the box.
 4. Press **Save**.
 
-The box empties the moment it has the text, and the panel then says how much
-it holds and waits for Save. Nothing you put there stays on the page, so
-nobody can read it over your shoulder and no second copy can take it back
-out. What lands in the box before the page takes it is covered up as well.
+The box covers what you put in it, the way a password field does, so nobody
+reads it over your shoulder. Save empties it, and so does closing the
+dialog.
 
 The panel then says how many cookies it holds, which sites they are for, and
 when the first one expires. The next download uses them. Nothing restarts.
@@ -39,9 +38,9 @@ Press **Choose file** rather than pasting when you can. A paste through some
 fields turns the tabs into spaces, and the format needs the tabs. The server
 says so when it happens, but the file button never has the problem.
 
-The page never shows the cookies. It shows the count, the sites, and the
-dates, and no route sends the content back. **Remove** deletes the saved
-file.
+After that the page never shows the cookies again. It shows the count, the
+sites, and the dates, and no route sends the content back. **Remove**
+deletes the saved file.
 
 Who can save them is who can open the page. In public mode that is the
 password, like the rest of the page. In local mode there is no password, so

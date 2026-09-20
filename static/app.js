@@ -262,15 +262,7 @@ el("logout").addEventListener("click", async () => {
   window.location.replace("/login");
 });
 
-// --- The settings panel ---------------------------------------------------
-
-// The cookies wait here, and never in the box on the page. A paste goes
-// straight into this variable, so the page holds nothing that a person at
-// the screen can read, and nothing that a second copy can take back out.
-let pendingCookies = "";
-
-// Below this, what arrived is somebody typing, not a file landing.
-const PASTE_SIZE = 60;
+// --- The settings dialog --------------------------------------------------
 
 function whenText(iso) {
   if (!iso) return "";
@@ -289,27 +281,20 @@ function showDetail(text) {
   if (text) show(node); else hide(node);
 }
 
-function holdCookies(text) {
-  const body = (text || "").trim();
-  if (!body) return;
-  pendingCookies = body;
-  const lines = body.split("\n").filter((line) => line.trim()).length;
-  const many = lines === 1 ? "line" : "lines";
-  const size = humanSize(new Blob([body]).size);
-  el("cookie-ready-text").textContent =
-    `Ready to save: ${lines} ${many}, ${size}`;
-  el("cookie-text").value = "";
-  hide(el("cookie-drop"));
-  show(el("cookie-ready"));
-  el("cookie-save").disabled = false;
-}
-
-function dropCookies() {
-  pendingCookies = "";
-  el("cookie-text").value = "";
-  show(el("cookie-drop"));
-  hide(el("cookie-ready"));
-  el("cookie-save").disabled = true;
+function describeCookies(state) {
+  if (state.source === "pasted") {
+    const many = state.count === 1 ? "cookie" : "cookies";
+    return `${state.count} ${many} saved ${whenText(state.saved)}`;
+  }
+  if (state.source === "file") {
+    return "Using the file that the operator placed";
+  }
+  if (state.source === "broken") {
+    return "The saved file no longer reads as cookies";
+  }
+  return state.writable
+    ? "No cookies saved"
+    : "No cookies saved, and this server cannot write the file";
 }
 
 function renderCookies(state) {
@@ -332,22 +317,6 @@ function renderCookies(state) {
   showDetail(parts.join("  ·  "));
 }
 
-function describeCookies(state) {
-  if (state.source === "pasted") {
-    const many = state.count === 1 ? "cookie" : "cookies";
-    return `${state.count} ${many} saved ${whenText(state.saved)}`;
-  }
-  if (state.source === "file") {
-    return "Using the file that the operator placed";
-  }
-  if (state.source === "broken") {
-    return "The saved file no longer reads as cookies";
-  }
-  return state.writable
-    ? "No cookies saved"
-    : "No cookies saved, and this server cannot write the file";
-}
-
 function failCookies(text) {
   el("cookie-state-text").textContent = text;
   setDot("bad");
@@ -363,63 +332,46 @@ async function loadCookies() {
 }
 
 el("settings-toggle").addEventListener("click", () => {
-  const panel = el("settings");
-  const open = panel.classList.toggle("hidden") === false;
-  el("settings-toggle").setAttribute("aria-expanded", String(open));
-  if (open) loadCookies(); else dropCookies();
+  el("settings").showModal();
+  loadCookies();
 });
 
-// The paste never reaches the box. Reading it here and stopping the event
-// keeps the cookies off the screen and out of the page.
-el("cookie-text").addEventListener("paste", (event) => {
-  const text = (event.clipboardData || window.clipboardData).getData("text");
-  if (!text) return;
-  event.preventDefault();
-  holdCookies(text);
+el("settings-close").addEventListener("click", () => el("settings").close());
+
+// A press on the dark part closes it. The dialog itself is that part,
+// because the card inside takes every press of its own.
+el("settings").addEventListener("click", (event) => {
+  if (event.target === el("settings")) el("settings").close();
 });
 
-el("cookie-text").addEventListener("drop", (event) => {
-  const data = event.dataTransfer;
-  const file = data.files && data.files[0];
-  event.preventDefault();
-  if (file) { file.text().then(holdCookies); return; }
-  holdCookies(data.getData("text"));
-});
-
-// A paste that arrives by another road, such as the middle button on Linux,
-// lands in the box. Anything file sized is taken out of it at once.
-el("cookie-text").addEventListener("input", (event) => {
-  const value = event.target.value;
-  if (value.length >= PASTE_SIZE || value.includes("\n")) holdCookies(value);
-});
+// Escape closes it as well, and either way the box must not keep cookies.
+el("settings").addEventListener("close", () => { el("cookie-text").value = ""; });
 
 el("cookie-file").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   // Reading the file keeps the tabs, which a paste through some fields
   // turns into spaces. The format needs the tabs.
-  holdCookies(await file.text());
+  el("cookie-text").value = await file.text();
   event.target.value = "";
 });
 
-el("cookie-discard").addEventListener("click", dropCookies);
-
 el("cookie-save").addEventListener("click", async () => {
   const button = el("cookie-save");
-  const text = pendingCookies || el("cookie-text").value;
   button.disabled = true;
   button.textContent = "Saving";
   try {
-    const state = await sendJson("PUT", "/api/cookies", { text });
-    // Nothing of a credential stays on the page after it is saved.
-    dropCookies();
+    const state = await sendJson("PUT", "/api/cookies",
+                                 { text: el("cookie-text").value });
+    // The page holds no copy of a credential longer than it must.
+    el("cookie-text").value = "";
     renderCookies(state);
     clearFail();
   } catch (error) {
     failCookies(error.message);
   } finally {
+    button.disabled = false;
     button.textContent = "Save";
-    button.disabled = !pendingCookies;
   }
 });
 

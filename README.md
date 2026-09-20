@@ -90,8 +90,8 @@ address.
 
 Export the cookies of a browser that is signed in, press **Settings** on the
 page, choose the file, and press Save. The next download uses them, and
-nothing restarts. The box empties the moment it has the text, so nothing a
-person can read or copy again stays on the page. The panel shows how many
+nothing restarts. The box covers what goes into it and empties when you
+save, so nothing stays on the page. The panel shows how many
 cookies it holds and when the first one expires, and it never shows the
 cookies themselves. Remove deletes them.
 

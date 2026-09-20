@@ -571,3 +571,128 @@ def test_each_attempt_keeps_its_own_notes(monkeypatch):
     # what the first one met on the way.
     assert "streaming protocol" in str(caught.value)
     assert "token" not in str(caught.value)
+
+
+# ---- the proof token server ---------------------------------------------
+
+import http.server
+import threading
+
+
+class _Ping(http.server.BaseHTTPRequestHandler):
+    """Answers /ping the way the bgutil server does, and nothing else."""
+
+    version = "2.0.0"
+
+    def do_GET(self):
+        if self.path != "/ping":
+            self.send_error(404)
+            return
+        body = f'{{"server_uptime": 1.0, "version": "{self.version}"}}'.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        return None
+
+
+@pytest.fixture()
+def token_server(monkeypatch):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Ping)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    monkeypatch.setenv(config.POT_SERVER_ENV, url)
+    monkeypatch.setattr(downloader, "_token_server_seen",
+                        {"at": 0.0, "ready": False, "version": None})
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture()
+def no_token_server(monkeypatch):
+    monkeypatch.setenv(config.POT_SERVER_ENV, "off")
+    monkeypatch.setattr(downloader, "_token_server_seen",
+                        {"at": 0.0, "ready": False, "version": None})
+
+
+def test_a_token_server_that_answers_hands_the_clients_to_yt_dlp(token_server):
+    assert downloader.token_server_ready() is True
+    assert downloader.token_server_version() == "2.0.0"
+    assert downloader.default_clients() == ()
+    with downloader.site_opts() as opts:
+        youtube = (opts.get("extractor_args") or {}).get("youtube")
+        assert youtube is None
+
+
+def test_a_token_server_elsewhere_is_named_to_the_plugin(token_server):
+    with downloader.site_opts() as opts:
+        assert opts["extractor_args"]["youtubepot-bgutilhttp"] == {
+            "base_url": [token_server]}
+
+
+def test_the_default_address_needs_no_saying(monkeypatch):
+    # The plugin looks at this one by itself.
+    monkeypatch.delenv(config.POT_SERVER_ENV, raising=False)
+    assert config.pot_server() == config.POT_SERVER
+
+
+def test_no_server_keeps_the_token_free_clients(no_token_server):
+    assert downloader.token_server_ready() is False
+    assert downloader.default_clients() == downloader.token_free_clients()
+
+
+def test_a_closed_port_counts_as_no_server(monkeypatch):
+    monkeypatch.setenv(config.POT_SERVER_ENV, "http://127.0.0.1:1")
+    monkeypatch.setattr(downloader, "_token_server_seen",
+                        {"at": 0.0, "ready": False, "version": None})
+    assert downloader.token_server_ready() is False
+    assert downloader.default_clients() == downloader.token_free_clients()
+
+
+def test_the_server_is_asked_once_a_minute_not_once_a_job(token_server,
+                                                         monkeypatch):
+    calls = []
+    real = downloader.urllib.request.urlopen
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(downloader.urllib.request, "urlopen", counting)
+    for _ in range(5):
+        downloader.token_server_ready()
+    assert len(calls) == 1
+
+
+def test_off_is_a_word_for_no_server(monkeypatch):
+    for word in ("off", "none", "0", "no", "OFF"):
+        monkeypatch.setenv(config.POT_SERVER_ENV, word)
+        assert config.pot_server() is None
+
+
+def test_the_operator_choice_of_clients_still_wins(token_server, monkeypatch):
+    monkeypatch.setenv(config.PLAYER_CLIENT_ENV, "tv")
+    with downloader.site_opts() as opts:
+        assert opts["extractor_args"]["youtube"]["player_client"] == ["tv"]
+
+
+def test_the_startup_line_names_a_server_that_answers(token_server, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    main.say_which_youtube_clients()
+    assert "2.0.0" in caplog.text
+    assert "yt-dlp picks" in caplog.text
+
+
+def test_the_startup_line_says_where_to_get_one(no_token_server, caplog,
+                                                  monkeypatch):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setenv(config.POT_SERVER_ENV, "http://127.0.0.1:1")
+    main.say_which_youtube_clients()
+    assert "need no token" in caplog.text
+    assert "section 12" in caplog.text

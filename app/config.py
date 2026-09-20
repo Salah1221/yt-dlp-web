@@ -18,6 +18,11 @@ COOKIE_BROWSER_ENV = "YTDLP_WEB_COOKIES_FROM_BROWSER"
 COOKIE_STORE_ENV = "YTDLP_WEB_COOKIE_STORE"
 PLAYER_CLIENT_ENV = "YTDLP_WEB_PLAYER_CLIENT"
 JS_RUNTIME_ENV = "YTDLP_WEB_JS_RUNTIMES"
+POT_SERVER_ENV = "YTDLP_WEB_POT_SERVER"
+
+# Where the proof token server listens when nothing says otherwise. It is
+# the address the yt-dlp plugin looks at by itself.
+POT_SERVER = "http://127.0.0.1:4416"
 
 # yt-dlp runs a JavaScript runtime to answer the signature challenge of
 # YouTube. It enables deno by itself and finds it on PATH. The others it
@@ -185,6 +190,23 @@ def js_runtimes() -> dict[str, dict] | None:
             continue
         runtimes[name.strip().lower()] = {"path": path.strip()} if path.strip() else {}
     return runtimes or None
+
+
+def pot_server() -> str | None:
+    """Return the proof token server to ask, or None for none.
+
+    YouTube hands a proof token to a browser and holds its streams from
+    a server without one. A small server beside this one mints the
+    token, and the yt-dlp plugin that asks it is installed with it. The
+    default is where that server listens by itself, and `off` says
+    there is none to ask, which saves a knock on a closed door.
+    """
+    value = _text(POT_SERVER_ENV)
+    if value is None:
+        return POT_SERVER
+    if value.lower() in ("off", "none", "0", "no"):
+        return None
+    return value.rstrip("/")
 
 
 def check_js_runtimes() -> None:

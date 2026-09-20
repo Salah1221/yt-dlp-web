@@ -202,3 +202,37 @@ def test_the_placed_file_is_never_written_back(tmp_path, monkeypatch):
             "# Netscape HTTP Cookie File\n" + LINE.replace("abc123", "x") + "\n")
     # It can be owned by root on a read-only path, so it is left as it is.
     assert placed.read_text().endswith(LINE + "\n")
+
+
+def test_a_sign_out_never_replaces_the_saved_cookies(store):
+    cookiestore.save(f"# Netscape HTTP Cookie File\n{LINE}\n{OTHER}")
+    with downloader.site_opts() as opts:
+        # This is the jar that comes back when the site refuses the
+        # session: the cookies that signed it in are gone.
+        pathlib.Path(opts["cookiefile"]).write_text(
+            "# Netscape HTTP Cookie File\n"
+            ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tVISITOR_INFO1_LIVE\tanon\n")
+    state = cookiestore.status()
+    assert state["count"] == 2
+    assert "abc123" in store.read_text()
+
+
+def test_a_cookie_added_beside_the_saved_ones_is_taken(store):
+    cookiestore.save(LINE)
+    added = ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tVISITOR_INFO1_LIVE\tv"
+    with downloader.site_opts() as opts:
+        pathlib.Path(opts["cookiefile"]).write_text(
+            f"# Netscape HTTP Cookie File\n{LINE}\n{added}\n")
+    # Nothing was lost, so this is the site handing out one more.
+    assert cookiestore.status()["count"] == 2
+
+
+def test_one_cookie_going_missing_holds_the_whole_file(store):
+    cookiestore.save(f"# Netscape HTTP Cookie File\n{LINE}\n{OTHER}")
+    with downloader.site_opts() as opts:
+        # A rotation of one cookie is worth nothing if the other went.
+        pathlib.Path(opts["cookiefile"]).write_text(
+            "# Netscape HTTP Cookie File\n"
+            + LINE.replace("abc123", "rotated") + "\n")
+    assert cookiestore.status()["count"] == 2
+    assert "rotated" not in store.read_text()

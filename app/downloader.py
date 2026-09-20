@@ -464,13 +464,16 @@ def explain(error: Exception, mode: str | None = None,
     if not _matches(error, BOT_CHECK_MARKS):
         return text
     if config.cookie_file() or config.cookies_from_browser():
-        return ("the site refused the cookies of this server. Export them "
-                "again from a browser that is signed in to the site, replace "
-                "the cookie file, and restart the server.")
+        return ("the site refused the cookies this server holds. Export "
+                "them again from a private window that is signed in, and "
+                "save them in Settings. Nothing needs a restart. If fresh "
+                "cookies are refused as well, it is the address of this "
+                "server that the site will not have, and not the account: "
+                "docs/cookies.md ends with what answers that.")
     return ("the site asks this server to sign in and prove it is not a "
-            "robot. Export the cookies of a signed in browser to a "
-            f"cookies.txt file, set {config.COOKIE_FILE_ENV} to that file, "
-            "and restart the server. docs/cookies.md holds the steps.")
+            "robot. Press Settings on this page and save a cookies.txt "
+            "exported from a browser that is signed in. docs/cookies.md "
+            "holds the steps.")
 
 
 def _extract(opts: dict, url: str, download: bool) -> dict | None:

@@ -80,16 +80,27 @@ def test_a_blank_browser_setting_is_no_setting(monkeypatch):
     assert config.cookies_from_browser() is None
 
 
-def test_the_robot_message_names_the_cookie_setting():
+def test_the_robot_message_sends_a_person_to_the_settings_panel():
     message = downloader.explain(DownloadError(BOT_MESSAGE))
-    assert config.COOKIE_FILE_ENV in message
+    assert "Settings" in message
+    assert "cookies.txt" in message
+    # The yt-dlp text names command line options this page has none of.
     assert "--cookies-from-browser" not in message
+
+
+def test_the_robot_message_asks_for_no_restart():
+    # The cookie file is read for each download, so saving is enough.
+    message = downloader.explain(DownloadError(BOT_MESSAGE))
+    assert "restart the server" not in message
 
 
 def test_the_robot_message_changes_when_cookies_are_set(cookie_jar):
     message = downloader.explain(DownloadError(BOT_MESSAGE))
     assert "refused the cookies" in message
-    assert config.COOKIE_FILE_ENV not in message
+    assert "restart the server" not in message
+    # Fresh cookies are not always the answer, and saying so saves a
+    # person exporting them over and over.
+    assert "address of this server" in message
 
 
 def test_every_other_error_keeps_its_own_words():

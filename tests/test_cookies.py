@@ -21,18 +21,18 @@ def cookie_jar(tmp_path, monkeypatch):
 
 
 def test_no_setting_means_no_cookie_option():
-    with downloader.cookie_opts() as opts:
+    with downloader.site_opts() as opts:
         assert opts == {}
 
 
 def test_the_cookie_file_reaches_yt_dlp(cookie_jar):
-    with downloader.cookie_opts() as opts:
+    with downloader.site_opts() as opts:
         assert "cookiefile" in opts
         assert open(opts["cookiefile"]).read() == cookie_jar.read_text()
 
 
 def test_yt_dlp_reads_a_copy_and_never_the_operator_file(cookie_jar):
-    with downloader.cookie_opts() as opts:
+    with downloader.site_opts() as opts:
         copy = opts["cookiefile"]
         assert copy != str(cookie_jar)
         # yt-dlp writes the jar back when it closes. That write must land
@@ -44,20 +44,20 @@ def test_yt_dlp_reads_a_copy_and_never_the_operator_file(cookie_jar):
 def test_the_copy_is_deleted_when_the_call_ends(cookie_jar):
     import os
 
-    with downloader.cookie_opts() as opts:
+    with downloader.site_opts() as opts:
         copy = opts["cookiefile"]
     assert not os.path.exists(copy)
 
 
 def test_two_calls_use_two_copies(cookie_jar):
-    with downloader.cookie_opts() as first:
-        with downloader.cookie_opts() as second:
+    with downloader.site_opts() as first:
+        with downloader.site_opts() as second:
             assert first["cookiefile"] != second["cookiefile"]
 
 
 def test_the_browser_setting_reaches_yt_dlp(monkeypatch):
     monkeypatch.setenv(config.COOKIE_BROWSER_ENV, "firefox")
-    with downloader.cookie_opts() as opts:
+    with downloader.site_opts() as opts:
         assert opts["cookiesfrombrowser"] == ("firefox", None, None, None)
 
 

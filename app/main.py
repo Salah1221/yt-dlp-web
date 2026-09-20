@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import time
 import urllib.parse
@@ -17,6 +18,11 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import auth, cleanup, config, downloader, jobs, limits, urlguard
+
+# uvicorn runs this application, and this is the logger it formats and
+# sends to its own output. A logger of our own would reach the journal
+# without a level in front of it.
+log = logging.getLogger("uvicorn.error")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -72,6 +78,29 @@ def client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def warn_about_the_js_runtime() -> None:
+    """Say so when YouTube will be served without a JavaScript runtime.
+
+    yt-dlp answers the signature challenge of YouTube in JavaScript. With
+    no runtime it falls back to the one client that needs none, which
+    drops formats and meets the robot check more often. It only warns,
+    because every other site keeps working.
+    """
+    if config.js_runtimes() or shutil.which("deno"):
+        return
+    found = config.js_runtime_on_path()
+    if found:
+        log.warning(
+            "no deno on PATH, so yt-dlp runs YouTube without a JavaScript "
+            "runtime. %s is on PATH. Set %s=%s to use it.",
+            found, config.JS_RUNTIME_ENV, found)
+        return
+    log.warning(
+        "no JavaScript runtime on PATH, so yt-dlp serves YouTube with fewer "
+        "formats and meets the robot check more often. Install deno, or set "
+        "%s to a runtime that is installed.", config.JS_RUNTIME_ENV)
+
+
 def create_app(store: jobs.JobStore | None = None) -> FastAPI:
     root = config.temp_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -83,6 +112,9 @@ def create_app(store: jobs.JobStore | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         config.check_startup()
         config.check_cookies()
+        config.check_js_runtimes()
+        downloader.check_player_clients()
+        warn_about_the_js_runtime()
         # Wrap the socket layer once, so a redirect to a private address
         # is caught at connection time and not only before the request.
         urlguard.install()

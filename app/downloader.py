@@ -86,8 +86,11 @@ def build_opts(mode: str, workdir: str, format_id: str | None = None,
 
 
 @contextmanager
-def cookie_opts() -> Iterator[dict]:
-    """Yield the yt-dlp options that carry the site cookies.
+def site_opts() -> Iterator[dict]:
+    """Yield the yt-dlp options that say who this server is to the site.
+
+    That is the cookies, the YouTube client to ask, and the JavaScript
+    runtime that answers the signature challenge of YouTube.
 
     yt-dlp writes the jar back to the cookie file when it closes, and two
     jobs can run at the same time, so each call reads its own copy. The
@@ -95,6 +98,12 @@ def cookie_opts() -> Iterator[dict]:
     a read-only path.
     """
     opts: dict = {}
+    runtimes = config.js_runtimes()
+    if runtimes:
+        opts["js_runtimes"] = runtimes
+    clients = config.player_clients()
+    if clients:
+        opts["extractor_args"] = {"youtube": {"player_client": clients}}
     browser = config.cookies_from_browser()
     if browser:
         opts["cookiesfrombrowser"] = browser
@@ -114,6 +123,39 @@ def cookie_opts() -> Iterator[dict]:
         yield opts
     finally:
         copy.unlink(missing_ok=True)
+
+
+def known_player_clients() -> tuple[str, ...]:
+    """Return the client names that this yt-dlp knows, or nothing.
+
+    The table is internal to yt-dlp, so an upgrade can move it. The empty
+    answer turns the check below off rather than stopping the server.
+    """
+    try:
+        from yt_dlp.extractor.youtube._base import INNERTUBE_CLIENTS
+    except ImportError:  # pragma: no cover - only on a changed yt-dlp
+        return ()
+    return tuple(name for name in INNERTUBE_CLIENTS if not name.startswith("_"))
+
+
+def check_player_clients() -> None:
+    """Refuse to start when a client name is not one yt-dlp knows.
+
+    yt-dlp skips an unknown name with a warning and carries on with the
+    default. This application turns warnings off, so the typo would be
+    silent and the setting would look as if it did nothing.
+    """
+    known = known_player_clients()
+    if not known:
+        return
+    for name in config.player_clients() or []:
+        # yt-dlp reads these three forms as well as a client name.
+        if name in ("default", "all") or name.startswith("-"):
+            continue
+        if name not in known:
+            raise RuntimeError(
+                f"{config.PLAYER_CLIENT_ENV} names {name}, which yt-dlp does "
+                f"not know. The names are: {', '.join(sorted(known))}.")
 
 
 def explain(error: Exception) -> str:
@@ -220,9 +262,9 @@ def probe(url: str) -> dict:
     urlguard.check_url(url, allow_private=allow_private)
     # The guard stays on for the whole call, so a redirect to a private
     # address is refused at connection time as well.
-    with cookie_opts() as cookies:
+    with site_opts() as extra:
         opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "noplaylist": True, **cookies}
+                "noplaylist": True, **extra}
         try:
             with urlguard.guarded(allow_private=allow_private):
                 with YoutubeDL(opts) as ydl:
@@ -288,9 +330,9 @@ def run(job: jobs.Job, store: jobs.JobStore) -> None:
                       postprocessor_hook=postprocessor_hook)
     try:
         urlguard.check_url(job.url, allow_private=allow_private)
-        with cookie_opts() as cookies:
+        with site_opts() as extra:
             with urlguard.guarded(allow_private=allow_private):
-                with YoutubeDL({**opts, **cookies}) as ydl:
+                with YoutubeDL({**opts, **extra}) as ydl:
                     info = ydl.extract_info(job.url, download=True)
     except jobs.JobCancelled:
         jobs.delete_workdir(job)

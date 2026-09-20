@@ -78,6 +78,8 @@ The application refuses to start in the one unsafe combination: a host that is n
 | `YTDLP_WEB_TTL` | 1800 | seconds before an uncollected file is deleted |
 | `YTDLP_WEB_COOKIES` | none | a `cookies.txt` file to send to the site |
 | `YTDLP_WEB_COOKIES_FROM_BROWSER` | none | a browser profile on this machine to read the cookies from |
+| `YTDLP_WEB_PLAYER_CLIENT` | none | the YouTube clients to ask, in order, such as `tv,web_safari` |
+| `YTDLP_WEB_JS_RUNTIMES` | `deno` | the JavaScript runtimes yt-dlp may use, such as `node` |
 
 ### "Sign in to confirm you're not a bot"
 
@@ -92,6 +94,24 @@ browser profile instead, and no export is needed.
 
 The cookie file holds a live session of your account. Give it mode 640 and
 keep it out of the code folder.
+
+Two settings can help without a cookie, and neither always works:
+
+- `YTDLP_WEB_JS_RUNTIMES`. yt-dlp answers the signature challenge of YouTube
+  in JavaScript, and it looks for deno alone by itself. With no runtime it
+  falls back to the one client that needs none, which gives fewer formats and
+  meets the check more often. Install deno, or name the runtime you have:
+  `YTDLP_WEB_JS_RUNTIMES=node`. The server writes a warning at startup when it
+  finds none. The list replaces the default, so naming `node` turns deno off.
+- `YTDLP_WEB_PLAYER_CLIENT`. YouTube serves the same video to a phone, a
+  television, and a browser, and it applies the check to each differently.
+  `YTDLP_WEB_PLAYER_CLIENT=tv,web_safari` asks them in that order. Which
+  client answers changes from month to month, so treat it as something to
+  try, not as a fix.
+
+The check follows the address more than anything else. The same URL that
+fails on a rented server often works from a home connection, where this
+application was made to run.
 
 ### The outbound address guard
 

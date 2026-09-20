@@ -80,6 +80,50 @@ they run, and a locked database gives an error in place of a download.
 This route needs a browser profile on the machine that runs the server, so it
 does not work on a server.
 
+## Without a cookie file
+
+Three things change the answer, and none of them always works.
+
+**Where the server runs.** The check follows the address. Many people share
+one server address, and the site counts that traffic together, so a rented
+server meets the check far more often than a home connection does. The same
+URL that fails on a server often works on your own machine, and on your own
+machine `YTDLP_WEB_COOKIES_FROM_BROWSER` needs no export at all.
+
+**A JavaScript runtime.** yt-dlp answers the signature challenge of YouTube
+in JavaScript. It enables deno by itself and finds it on PATH. With no
+runtime it falls back to the single client that needs none, which gives
+fewer formats and meets the check more often. Install deno, or name the
+runtime you already have:
+
+```
+YTDLP_WEB_JS_RUNTIMES=node
+```
+
+On a Debian server `apt install -y nodejs` is the short route. The server
+writes a warning at startup when it finds no runtime, so the log tells you
+whether this applies to you. The list replaces the default, so naming `node`
+turns deno off.
+
+**Another client.** YouTube serves the same video to a phone, a television,
+and a browser, and it applies the check to each of them differently.
+
+```
+YTDLP_WEB_PLAYER_CLIENT=tv,web_safari
+```
+
+The clients are asked in that order. yt-dlp knows `web`, `web_safari`,
+`web_embedded`, `web_music`, `web_creator`, `android`, `android_vr`, `ios`,
+`visionos`, `mweb`, `tv`, `tv_downgraded`, and `tv_simply`. The server
+refuses to start on a name it does not know, so a typo cannot pass in
+silence. Which client answers changes from month to month. Treat this as
+something to try, and the cookie file as the answer that lasts.
+
+There is a fourth route, outside this application. YouTube accepts a proof
+of work token in place of a sign in, and a yt-dlp plugin can mint one. The
+yt-dlp wiki page *PO Token Guide* describes it. It is another moving part to
+keep working, so try the three above first.
+
 ## What the application does with the file
 
 Each call into yt-dlp gets its own copy of the file, and the copy is deleted

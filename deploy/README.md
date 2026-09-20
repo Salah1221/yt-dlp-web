@@ -329,6 +329,34 @@ The unit needs no change. The application copies the file for each download and 
 
 A session does not last forever. When the message returns, export the file again and replace it.
 
+### Before you export anything
+
+Two cheaper things change the same answer.
+
+yt-dlp answers the signature challenge of YouTube in JavaScript, and it looks for deno alone. Without a runtime YouTube gives fewer formats and asks for a sign in more often. The service writes a warning at startup when it finds none:
+
+```bash
+journalctl -u ytdlp-web -n 50 | grep -i javascript
+```
+
+Install a runtime and name it, if the warning is there:
+
+```bash
+apt install -y nodejs
+```
+
+```
+YTDLP_WEB_JS_RUNTIMES=node
+```
+
+The other is the client that yt-dlp asks for. YouTube applies the check differently to a television and to a browser:
+
+```
+YTDLP_WEB_PLAYER_CLIENT=tv,web_safari
+```
+
+Which client answers changes from month to month, so a cookie file remains the steady answer. `docs/cookies.md` describes both in full.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -342,6 +370,7 @@ A session does not last forever. When the message returns, export the file again
 | A login attempt returns 429 | the nginx rate limit stopped it (5 per minute per address) | wait one minute, or raise the rate in the `limit_req_zone` line |
 | A download fails with "Sign in to confirm you're not a bot" | the site wants a signed in visitor, and it asks a server address more often than a home one | give the service a cookie file, as section 11 describes |
 | The service does not start, and the log names `YTDLP_WEB_COOKIES` | the cookie file is absent, or the `ytdlp` user cannot read it | check the path and run `chown root:ytdlp` and `chmod 640` on the file |
+| The log warns about a JavaScript runtime | deno is not installed, so YouTube gives fewer formats | run `apt install -y nodejs` and set `YTDLP_WEB_JS_RUNTIMES=node` |
 
 ## Keeping it working
 
@@ -353,6 +382,13 @@ systemctl restart ytdlp-web
 ```
 
 Restart the service after every update. The old version stays in memory until the restart.
+
+Compare what is installed against what is released, when a site fails:
+
+```bash
+/opt/ytdlp-web/.venv/bin/yt-dlp --version
+curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
+```
 
 Update the system packages as well, because ffmpeg comes from the distribution.
 

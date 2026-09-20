@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -15,6 +16,14 @@ CLEANUP_INTERVAL_SECONDS = 60
 TEMP_ROOT_ENV = "YTDLP_WEB_TEMP_ROOT"
 COOKIE_FILE_ENV = "YTDLP_WEB_COOKIES"
 COOKIE_BROWSER_ENV = "YTDLP_WEB_COOKIES_FROM_BROWSER"
+PLAYER_CLIENT_ENV = "YTDLP_WEB_PLAYER_CLIENT"
+JS_RUNTIME_ENV = "YTDLP_WEB_JS_RUNTIMES"
+
+# yt-dlp runs a JavaScript runtime to answer the signature challenge of
+# YouTube. It enables deno by itself and finds it on PATH. The others it
+# uses only when they are named. These are the names it knows, in the
+# order it prefers them.
+JS_RUNTIMES = ("deno", "node", "quickjs", "bun")
 
 # downloader.cookie_opts writes one file with this prefix for each call
 # into yt-dlp, and the janitor sweeps up one that a crash left behind.
@@ -123,6 +132,59 @@ def cookies_from_browser() -> tuple[str | None, ...] | None:
     browser, _, keyring = head.partition("+")
     return (browser.strip().lower(), profile.strip() or None,
             keyring.strip().upper() or None, container.strip() or None)
+
+
+def player_clients() -> list[str] | None:
+    """Return the YouTube clients to ask, in order, or None for the default.
+
+    YouTube serves the same video to a phone, a television, and a
+    browser, and it applies the robot check to each of them differently.
+    A client that is not asked to sign in sometimes answers when the
+    default one does not. The value is a list: `tv,web_safari`.
+    """
+    value = _text(PLAYER_CLIENT_ENV)
+    if value is None:
+        return None
+    names = [name.strip() for name in value.split(",")]
+    return [name for name in names if name] or None
+
+
+def js_runtimes() -> dict[str, dict] | None:
+    """Return the JavaScript runtimes to enable, or None for the default.
+
+    The value names one runtime per comma, with an optional path after a
+    colon: `node`, or `node:/usr/bin/node`. yt-dlp enables deno alone by
+    itself, and a server that has node and no deno needs this line.
+    """
+    value = _text(JS_RUNTIME_ENV)
+    if value is None:
+        return None
+    runtimes: dict[str, dict] = {}
+    for part in value.split(","):
+        name, _, path = part.strip().partition(":")
+        if not name:
+            continue
+        runtimes[name.strip().lower()] = {"path": path.strip()} if path.strip() else {}
+    return runtimes or None
+
+
+def js_runtime_on_path() -> str | None:
+    """Return the first JavaScript runtime found on PATH, or None."""
+    for name in JS_RUNTIMES:
+        # quickjs ships as qjs, and the others carry their own name.
+        for binary in (("qjs", "quickjs") if name == "quickjs" else (name,)):
+            if shutil.which(binary):
+                return name
+    return None
+
+
+def check_js_runtimes() -> None:
+    """Refuse to start when a runtime name is not one yt-dlp knows."""
+    for name in js_runtimes() or {}:
+        if name not in JS_RUNTIMES:
+            raise RuntimeError(
+                f"{JS_RUNTIME_ENV} names {name}, which yt-dlp does not know. "
+                f"The names are: {', '.join(JS_RUNTIMES)}.")
 
 
 def check_cookies() -> None:

@@ -231,3 +231,63 @@ def test_a_second_thread_stays_free_while_this_thread_is_guarded(calls):
     assert not thread.is_alive()
     assert result.get("value") == "connected"
     assert "error" not in result
+
+
+# ---------------------------------------------------------------------------
+# One named address may pass, so the token server can be reached.
+# ---------------------------------------------------------------------------
+
+TOKEN_SERVER = (("127.0.0.1", 4416),)
+
+
+def test_a_named_target_passes_the_guard(calls):
+    """The proof token server sits on loopback beside this application.
+
+    The plugin that mints the token fetches it over HTTP. Without this,
+    the guard blocks that call and every download goes out with no
+    token, which is the thing the token server was installed to stop.
+    """
+    with urlguard.guarded(allow=TOKEN_SERVER):
+        assert socket.create_connection(("127.0.0.1", 4416)) == "connected"
+    assert calls == [("127.0.0.1", 4416)]
+
+
+def test_another_port_on_that_host_is_still_blocked(calls):
+    with urlguard.guarded(allow=TOKEN_SERVER):
+        with pytest.raises(urlguard.UnsafeUrl):
+            socket.create_connection(("127.0.0.1", 22))
+    assert calls == []
+
+
+def test_another_host_on_that_port_is_still_blocked(calls):
+    with urlguard.guarded(allow=TOKEN_SERVER):
+        with pytest.raises(urlguard.UnsafeUrl):
+            socket.create_connection(("10.0.0.5", 4416))
+    assert calls == []
+
+
+def test_a_named_target_does_not_outlive_its_block(calls):
+    with urlguard.guarded(allow=TOKEN_SERVER):
+        pass
+    with urlguard.guarded():
+        with pytest.raises(urlguard.UnsafeUrl):
+            socket.create_connection(("127.0.0.1", 4416))
+
+
+def test_a_nested_block_gives_the_outer_targets_back(calls):
+    with urlguard.guarded(allow=TOKEN_SERVER):
+        with urlguard.guarded():
+            with pytest.raises(urlguard.UnsafeUrl):
+                socket.create_connection(("127.0.0.1", 4416))
+        assert socket.create_connection(("127.0.0.1", 4416)) == "connected"
+
+
+def test_target_of_reads_the_host_and_the_port():
+    assert urlguard.target_of("http://127.0.0.1:4416") == ("127.0.0.1", 4416)
+    assert urlguard.target_of("http://example.com") == ("example.com", 80)
+    assert urlguard.target_of("https://example.com") == ("example.com", 443)
+
+
+def test_target_of_answers_none_for_what_it_cannot_read():
+    for bad in ("", "not a url", "ftp://example.com"):
+        assert urlguard.target_of(bad) is None

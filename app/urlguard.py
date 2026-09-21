@@ -151,6 +151,45 @@ def _check_target(host: str, port: int | None) -> None:
     _reject_blocked([text])
 
 
+def target_of(url: str) -> tuple[str, int] | None:
+    """Return the (host, port) that a URL connects to, or None.
+
+    This names one address for the guard to let through. It is not a
+    safety check, and nothing here decides whether an address is safe.
+    """
+    try:
+        parts = urlparse(url)
+        host = parts.hostname
+        port = parts.port or DEFAULT_PORTS.get(parts.scheme)
+    except ValueError:
+        return None
+    if not host or not port:
+        return None
+    return (host, int(port))
+
+
+def _is_allowed_target(host, port) -> bool:
+    """Return True when this exact address was named as permitted.
+
+    The proof token server runs on loopback beside this application, and
+    the plugin that mints the token fetches it over HTTP. The guard
+    blocks loopback, so without this the token never arrives and the
+    video site asks the server to prove it is not a robot.
+
+    The match is on the exact host and the exact port. Nothing else on
+    loopback is opened by it.
+    """
+    allowed = getattr(_state, "allow_targets", ())
+    if not allowed:
+        return False
+    text = str(host).strip("[]")
+    try:
+        number = int(port)
+    except (TypeError, ValueError):
+        return False
+    return (text, number) in allowed
+
+
 def install() -> None:
     """Wrap socket.create_connection one time. Safe to call again.
 
@@ -168,7 +207,8 @@ def install() -> None:
                 _state, "allow_private", False):
             host = address[0]
             port = address[1] if len(address) > 1 else None
-            _check_target(host, port)
+            if not _is_allowed_target(host, port):
+                _check_target(host, port)
         return original(address, *args, **kwargs)
 
     create_connection.__name__ = "create_connection"
@@ -179,7 +219,8 @@ def install() -> None:
 
 
 @contextmanager
-def guarded(allow_private: bool = False) -> Iterator[None]:
+def guarded(allow_private: bool = False,
+            allow: tuple = ()) -> Iterator[None]:
     """Turn the connection guard on for this thread only.
 
     The guard has an effect only after a call to install. On exit the old
@@ -188,10 +229,13 @@ def guarded(allow_private: bool = False) -> Iterator[None]:
     """
     previous_active = getattr(_state, "active", False)
     previous_allow = getattr(_state, "allow_private", False)
+    previous_targets = getattr(_state, "allow_targets", ())
     _state.active = True
     _state.allow_private = allow_private
+    _state.allow_targets = tuple(allow or ())
     try:
         yield
     finally:
         _state.active = previous_active
         _state.allow_private = previous_allow
+        _state.allow_targets = previous_targets

@@ -324,6 +324,20 @@ def token_server_version() -> str | None:
     return _token_server_seen["version"]
 
 
+def token_server_targets() -> tuple:
+    """Return the token server address, for the guard to let through.
+
+    The guard blocks loopback, and the plugin mints the token over
+    loopback. Naming that one address keeps the guard on for every
+    other address the extraction touches.
+    """
+    url = config.pot_server()
+    if not url:
+        return ()
+    target = urlguard.target_of(url)
+    return (target,) if target else ()
+
+
 def default_clients() -> tuple[str, ...]:
     """Return the clients to ask when the operator named none.
 
@@ -576,7 +590,8 @@ def attempt(opts: dict, url: str, download: bool, allow_private: bool,
     reaches the console.
     """
     def ask(current: dict, notes: Notes):
-        with urlguard.guarded(allow_private=allow_private):
+        with urlguard.guarded(allow_private=allow_private,
+                              allow=token_server_targets()):
             return _extract({**current, "no_warnings": False, "logger": notes,
                              # The reason a client's formats were dropped is
                              # a debug line for the clients yt-dlp asks by

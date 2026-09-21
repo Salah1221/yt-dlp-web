@@ -741,3 +741,18 @@ def test_a_robot_check_stops_once_the_cookies_are_spent():
 
 def test_a_robot_check_with_no_cookies_has_no_rung_left():
     assert downloader.next_fallback(_bot_error(), {}, ()) is None
+
+
+def test_the_token_server_is_named_for_the_guard(monkeypatch):
+    """The guard blocks loopback, and the token is minted on loopback.
+
+    Without naming it, every download goes out with no token, which is
+    the one thing the token server exists to prevent.
+    """
+    monkeypatch.setenv(config.POT_SERVER_ENV, "http://127.0.0.1:4416")
+    assert downloader.token_server_targets() == (("127.0.0.1", 4416),)
+
+
+def test_no_token_server_names_nothing_for_the_guard(monkeypatch):
+    monkeypatch.setenv(config.POT_SERVER_ENV, "off")
+    assert downloader.token_server_targets() == ()

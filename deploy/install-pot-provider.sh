@@ -7,7 +7,9 @@
 # through the plugin. See deploy/README.md section 12.
 set -euo pipefail
 
-VERSION="${POT_VERSION:-2.0.0}"          # plugin and server share a version
+# The plugin and the deno server must be the same version, so one number
+# picks both. Empty means take the current release. Set POT_VERSION to pin.
+VERSION="${POT_VERSION:-}"
 APP="${YTDLP_WEB_HOME:-/opt/ytdlp-web}"
 HOME_DIR="${POT_HOME:-/opt/bgutil-ytdlp-pot-provider}"
 STATE="${YTDLP_WEB_STATE:-/var/lib/ytdlp-web}"
@@ -42,6 +44,17 @@ EOF
     exit 1
 fi
 "$DENO" --version | head -1
+
+if [ -z "$VERSION" ]; then
+    say "Asking PyPI for the current version"
+    VERSION="$(curl -fsS https://pypi.org/pypi/bgutil-ytdlp-pot-provider/json         | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
+    if [ -z "$VERSION" ]; then
+        echo "Could not read the current version from PyPI." >&2
+        echo "Name one instead, for example: POT_VERSION=2.0.0 $0" >&2
+        exit 1
+    fi
+    say "The current version is $VERSION"
+fi
 
 say "Fetching the server source, version $VERSION"
 if [ -d "$HOME_DIR/.git" ]; then

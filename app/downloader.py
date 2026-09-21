@@ -512,7 +512,24 @@ def explain(error: Exception, mode: str | None = None,
                 "minute.")
     if not _matches(error, BOT_CHECK_MARKS):
         return text
-    if config.cookie_file() or config.cookies_from_browser():
+    has_cookies = bool(config.cookie_file() or config.cookies_from_browser())
+    if not token_server_ready():
+        # The token is the lever a server has, and an account is not what
+        # the site turns down here. Naming the cookies first sends a person
+        # around the export loop for something no export can answer.
+        lead = ("no proof token server answers beside this one. YouTube "
+                "holds its streams from a server address that carries no "
+                "token, and it asks that address to prove it is not a "
+                "robot. deploy/README.md section 12 installs one.")
+        if has_cookies:
+            return (lead + " The cookies this server holds were turned "
+                    "down as well. Exporting them again does not answer "
+                    "this, because it is the address of this server that "
+                    "the site will not have, and not the account.")
+        return (lead + " A cookies.txt saved in Settings carries some "
+                "downloads past this on its own, and docs/cookies.md "
+                "holds the steps.")
+    if has_cookies:
         return ("the site refused the cookies this server holds. Export "
                 "them again from a private window that is signed in, and "
                 "save them in Settings. Nothing needs a restart. If fresh "

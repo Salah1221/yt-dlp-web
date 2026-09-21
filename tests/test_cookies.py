@@ -80,6 +80,12 @@ def test_a_blank_browser_setting_is_no_setting(monkeypatch):
     assert config.cookies_from_browser() is None
 
 
+@pytest.fixture()
+def token_server(monkeypatch):
+    """Act as if a proof token server answers."""
+    monkeypatch.setattr(downloader, "token_server_ready", lambda: True)
+
+
 def test_the_robot_message_sends_a_person_to_the_settings_panel():
     message = downloader.explain(DownloadError(BOT_MESSAGE))
     assert "Settings" in message
@@ -94,13 +100,40 @@ def test_the_robot_message_asks_for_no_restart():
     assert "restart the server" not in message
 
 
-def test_the_robot_message_changes_when_cookies_are_set(cookie_jar):
+def test_the_robot_message_changes_when_cookies_are_set(cookie_jar, token_server):
     message = downloader.explain(DownloadError(BOT_MESSAGE))
     assert "refused the cookies" in message
     assert "restart the server" not in message
     # Fresh cookies are not always the answer, and saying so saves a
     # person exporting them over and over.
     assert "address of this server" in message
+
+
+def test_the_robot_message_names_the_token_server_when_none_answers():
+    """The strongest lever a server has is the token, not the account.
+
+    Without a token server, YouTube holds its streams from this address
+    whatever account it is shown. Naming the cookies first sends a
+    person around the export loop for something cookies cannot fix.
+    """
+    message = downloader.explain(DownloadError(BOT_MESSAGE))
+    assert "proof token" in message
+    assert "section 12" in message
+
+
+def test_the_robot_message_still_offers_cookies_when_none_are_set():
+    message = downloader.explain(DownloadError(BOT_MESSAGE))
+    assert "Settings" in message
+    assert "cookies.txt" in message
+
+
+def test_no_token_server_says_another_export_will_not_answer(cookie_jar):
+    message = downloader.explain(DownloadError(BOT_MESSAGE))
+    assert "proof token" in message
+    assert "address of this server" in message
+    # The person has already exported cookies. Saying "export them again"
+    # here is the advice that wasted their time.
+    assert "Export them again" not in message
 
 
 def test_every_other_error_keeps_its_own_words():

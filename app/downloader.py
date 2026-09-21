@@ -421,9 +421,13 @@ def next_fallback(error: Exception, opts: dict,
                   spent: tuple[str, ...]) -> tuple[str, dict] | None:
     """Return the next thing to try after a failure, or None to stop.
 
-    Both of the failures that YouTube answers a server with mean the
-    same thing underneath: the clients that were asked served nothing.
-    So both walk the same short ladder, and each rung is taken once.
+    The failures that YouTube answers a server with mean the same thing
+    underneath: the clients that were asked served nothing, or they
+    served nothing to this asker. So they walk the same short ladder,
+    and each rung is taken once.
+
+    A robot check takes the second rung only. Which client answered is
+    not what it is about.
 
     The refused client goes first, because dropping it costs nothing
     and keeps the sign in.
@@ -436,9 +440,14 @@ def next_fallback(error: Exception, opts: dict,
     An operator who named the clients has said what to ask, so the
     first rung is theirs to keep and only the second is taken.
     """
-    if not (_matches(error, RELOAD_MARKS) or _matches(error, FORMAT_MARKS)):
+    is_bot = _matches(error, BOT_CHECK_MARKS)
+    if not (is_bot or _matches(error, RELOAD_MARKS)
+            or _matches(error, FORMAT_MARKS)):
         return None
-    if "clients" not in spent and not config.player_clients():
+    # A robot check is about who is asking, not about which client
+    # answered, so the client rung has nothing to offer it. The cookies
+    # are the rung that changes who is asking.
+    if not is_bot and "clients" not in spent and not config.player_clients():
         asked = _asked_clients(opts)
         if not asked:
             return "clients", {"extractor_args": {"youtube": {
@@ -529,6 +538,14 @@ def explain(error: Exception, mode: str | None = None,
         return (lead + " A cookies.txt saved in Settings carries some "
                 "downloads past this on its own, and docs/cookies.md "
                 "holds the steps.")
+    if "cookies" in spent:
+        # The ladder already asked again as nobody, and that failed too.
+        return ("the site asked this server to prove it is not a robot, "
+                "with the cookies it holds and again without them. The "
+                "account is not what it is turning down, so another "
+                "export does not answer it. What is left is the address "
+                "this server sends from, and docs/cookies.md ends with "
+                "what answers that.")
     if has_cookies:
         return ("the site refused the cookies this server holds. Export "
                 "them again from a private window that is signed in, and "

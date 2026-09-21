@@ -175,3 +175,15 @@ def test_a_probe_runs_with_the_cookie_file_in_place(cookie_jar, media_url):
     # The local media server ignores cookies. This proves that yt-dlp
     # accepts the option and that the copy is readable while it runs.
     assert downloader.probe(media_url)["title"]
+
+
+def test_the_robot_message_says_it_was_tried_both_ways(cookie_jar, token_server):
+    """The ladder asked again as nobody, and that failed too.
+
+    Telling a person to export once more at that point is the advice
+    that sends them round the loop a fourth time.
+    """
+    message = downloader.explain(DownloadError(BOT_MESSAGE), spent=("cookies",))
+    assert "without them" in message
+    assert "Export them again" not in message
+    assert "address" in message

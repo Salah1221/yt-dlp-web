@@ -696,3 +696,48 @@ def test_the_startup_line_says_where_to_get_one(no_token_server, caplog,
     main.say_which_youtube_clients()
     assert "need no token" in caplog.text
     assert "section 12" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# The robot check walks the ladder too.
+# ---------------------------------------------------------------------------
+
+BOT_ERROR = ("ERROR: [youtube] abc: Sign in to confirm you are not a bot. "
+             "Use --cookies-from-browser or --cookies for the authentication.")
+
+
+def _bot_error():
+    from yt_dlp.utils import DownloadError
+    return DownloadError(BOT_ERROR)
+
+
+def test_a_robot_check_drops_the_cookies_and_asks_again():
+    """Signing in is what puts this server on the worst clients.
+
+    The ladder already knows that. It was never walked for a robot
+    check, so a cookie that provoked the check was asked with forever.
+    """
+    step = downloader.next_fallback(
+        _bot_error(), {"cookiefile": "/tmp/jar.txt"}, ())
+    assert step is not None
+    name, changes = step
+    assert name == "cookies"
+    assert changes["cookiefile"] is None
+    assert changes["cookiesfrombrowser"] is None
+
+
+def test_a_robot_check_does_not_bother_with_the_client_rung():
+    # A robot check is about who is asking, not about which client
+    # answered, so dropping a client has nothing to offer it.
+    step = downloader.next_fallback(
+        _bot_error(), {"cookiefile": "/tmp/jar.txt"}, ())
+    assert step[0] != "clients"
+
+
+def test_a_robot_check_stops_once_the_cookies_are_spent():
+    assert downloader.next_fallback(
+        _bot_error(), {"cookiefile": "/tmp/jar.txt"}, ("cookies",)) is None
+
+
+def test_a_robot_check_with_no_cookies_has_no_rung_left():
+    assert downloader.next_fallback(_bot_error(), {}, ()) is None
